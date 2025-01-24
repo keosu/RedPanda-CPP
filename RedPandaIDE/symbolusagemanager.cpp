@@ -51,13 +51,13 @@ void SymbolUsageManager::load()
         QMessageBox::critical(nullptr,
                               tr("Load symbol usage info failed"),
                               tr("Can't parse symbol usage file '%1': %2")
-                              .arg(filename)
-                              .arg(error.errorString()));
+                              .arg(filename,
+                                   error.errorString()));
     }
 
     mUsages.clear();
     QJsonArray array = doc.array();
-    foreach (const QJsonValue& val, array) {
+    for(const QJsonValue& val:array) {
         QJsonObject obj = val.toObject();
         QString fullname = obj["symbol"].toString();
         int count = obj["count"].toInt();

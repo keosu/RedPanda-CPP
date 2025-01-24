@@ -28,7 +28,6 @@
 #include <QImageWriter>
 #include <QImageWriter>
 #include <QMessageBox>
-#include <QTextCodec>
 
 ProjectGeneralWidget::ProjectGeneralWidget(const QString &name, const QString &group, QWidget *parent) :
     SettingsWidget(name,group,parent),
@@ -83,8 +82,7 @@ void ProjectGeneralWidget::doLoad()
         case FileType::CppSource:
             srcCount++;
             break;
-        case FileType::CppHeader:
-        case FileType::CHeader:
+        case FileType::CCppHeader:
             headerCount++;
             break;
         case FileType::WindowsResourceSource:
@@ -125,7 +123,6 @@ void ProjectGeneralWidget::doLoad()
     ui->cbDefaultCpp->setChecked(project->options().isCpp);
     ui->cbSupportXPTheme->setChecked(project->options().supportXPThemes);
     mIconPath = project->options().icon;
-    QPixmap icon(mIconPath);
     refreshIcon();
 }
 
@@ -221,7 +218,7 @@ void ProjectGeneralWidget::init()
 {
     ui->cbEncodingDetail->setVisible(false);
     ui->cbEncoding->clear();
-    ui->cbEncoding->addItem(tr("ANSI"),ENCODING_SYSTEM_DEFAULT);
+    ui->cbEncoding->addItem(tr("System Default(%1)").arg(QString(pCharsetInfoManager->getDefaultSystemEncoding())),ENCODING_SYSTEM_DEFAULT);
     ui->cbEncoding->addItem(tr("UTF-8"),ENCODING_UTF8);
     ui->cbEncoding->addItem(tr("UTF-8 BOM"),ENCODING_UTF8_BOM);
     foreach (const QString& langName, pCharsetInfoManager->languageNames()) {

@@ -52,8 +52,7 @@ enum class StatusChange {
     ModifyChanged = 0x0040,
     Selection = 0x0080,
     ReadOnly = 0x0100,
-    OpenFile = 0x0200,
-    Modified = 0x0400
+    Modified = 0x0200
 };
 
 Q_DECLARE_FLAGS(StatusChanges, StatusChange)
@@ -138,7 +137,7 @@ class TokenAttribute;
 using PTokenAttribute = std::shared_ptr<TokenAttribute>;
 class Document;
 using PDocument = std::shared_ptr<Document>;
-class SyntaxState;
+struct SyntaxState;
 class Syntaxer;
 using PSyntaxer = std::shared_ptr<Syntaxer>;
 class UndoList;
@@ -468,7 +467,7 @@ signals:
     void linesInserted(int FirstLine, int Count);
     void changed();
     void gutterClicked(Qt::MouseButton button, int x, int y, int line);
-    void statusChanged(StatusChanges changes);
+    void statusChanged(QSynedit::StatusChanges changes);
     void fontChanged();
     void tabSizeChanged();
 protected:
@@ -496,6 +495,7 @@ protected:
     void decPaintLock();
     SyntaxState calcSyntaxStateAtLine(int line, const QString &newLineText);
     void processCommand(EditCommand Command, QChar AChar = QChar(), void * pData = nullptr);
+    bool dragging() const { return mDragging; }
 
 private:
     int calcLineAlignedTopPos(int currentValue, bool passFirstLine);
@@ -528,7 +528,7 @@ private:
     void updateCaret();
     void recalcCharExtent();
     void updateModifiedStatus();
-    int reparseLines(int startLine, int endLine);
+    int reparseLines(int startLine, int endLine, bool needRescanFolds = true,  bool toDocumentEnd = true);
     //void reparseLine(int line);
     void uncollapse(PCodeFoldingRange FoldRange);
     void collapse(PCodeFoldingRange FoldRange);
@@ -641,7 +641,6 @@ private:
 
     QString getDisplayStringAtLine(int line) const;
 
-
 private slots:
     void onMaxLineWidthChanged();
     void updateHScrollBarLater();
@@ -751,6 +750,7 @@ private:
 
     PFormatter mFormatter;
     GlyphPostionsListCache mGlyphPostionCacheForInputMethod;
+    bool mDragging;
 
 friend class QSynEditPainter;
 

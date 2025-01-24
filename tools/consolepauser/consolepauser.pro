@@ -1,6 +1,6 @@
-QT -= gui
+QT =    # non-Qt project
 
-CONFIG += c++11 console
+CONFIG += c++17 console
 CONFIG -= app_bundle
 
 isEmpty(APP_NAME) {
@@ -30,6 +30,8 @@ LIBS+= \
 win32: {
     DEFINES += _WIN32_WINNT=0x0501
     LIBS += -lpsapi  # GetProcessMemoryInfo
+
+    gcc|clang: QMAKE_LFLAGS += -municode
 }
 
 CONFIG += lrelease
@@ -39,7 +41,7 @@ isEmpty(PREFIX) {
     PREFIX = /usr/local
 }
 isEmpty(LIBEXECDIR) {
-    LIBEXECDIR = $${PREFIX}/libexec
+    LIBEXECDIR = libexec
 }
 
 win32: {
@@ -49,6 +51,6 @@ win32: {
 }
 
 # Default rules for deployment.
-qnx: target.path = $${LIBEXECDIR}/$${APP_NAME}
-else: unix:!android: target.path = $${LIBEXECDIR}/$${APP_NAME}
+qnx: target.path = $${PREFIX}/$${LIBEXECDIR}/$${APP_NAME}
+else: unix:!android: target.path = $${PREFIX}/$${LIBEXECDIR}/$${APP_NAME}
 !isEmpty(target.path): INSTALLS += target

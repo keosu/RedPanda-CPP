@@ -52,8 +52,11 @@ bool FileCompiler::prepareForCompile()
         if (pSettings->languages().noDebugDirectivesWhenGenerateASM())
             compilerSet()->setCompileOption(CC_CMD_OPT_DEBUG_INFO,COMPILER_OPTION_OFF);
         break;
+    case CppCompileType::GenerateGimpleOnly:
+        stage = Settings::CompilerSet::CompilationStage::GenerateGimple;
+        break;
     default:
-        stage = oldStage;
+        break;
     }
     compilerSet()->setCompilationStage(stage);
     if (mOnlyCheckSyntax) {
@@ -65,8 +68,17 @@ bool FileCompiler::prepareForCompile()
     log(tr("- Filename: %1").arg(mFilename));
     log(tr("- Compiler Set Name: %1").arg(compilerSet()->name()));
     log("");
+
     FileType fileType = getFileType(mFilename);
-    mArguments = QStringList{mFilename};
+    CompilerType compilerType = compilerSet()->compilerType();
+
+    // GCC `import std;` sources should be added before the main file to generate GCM cache
+    if (fileType == FileType::CppSource &&
+        (compilerType == CompilerType::GCC || compilerType == CompilerType::GCC_UTF8)) {
+        mArguments += getCppGccImportStdSources(mOnlyCheckSyntax);
+    }
+
+    mArguments += QStringList{localizePath(mFilename)};
     if (!mOnlyCheckSyntax) {
         switch(compilerSet()->compilationStage()) {
         case Settings::CompilerSet::CompilationStage::PreprocessingOnly:
@@ -76,6 +88,10 @@ bool FileCompiler::prepareForCompile()
         case Settings::CompilerSet::CompilationStage::CompilationProperOnly:
             mOutputFile=changeFileExt(mFilename,compilerSet()->compilationProperSuffix());
             mArguments += {"-S", "-fverbose-asm"};
+            break;
+        case Settings::CompilerSet::CompilationStage::GenerateGimple:
+            mOutputFile=changeFileExt(mFilename,compilerSet()->compilationProperSuffix());
+            mArguments += {"-S", QString("-fdump-tree-gimple=%1").arg(localizePath(changeFileExt(mFilename,"gimple")))};
             break;
         case Settings::CompilerSet::CompilationStage::AssemblingOnly:
             mOutputFile=changeFileExt(mFilename,compilerSet()->assemblingSuffix());
@@ -91,7 +107,8 @@ bool FileCompiler::prepareForCompile()
             }
         }
 #endif
-        mArguments += {"-o", mOutputFile};
+        mOutputFile = localizePath(mOutputFile);
+        mArguments += {"-o",  mOutputFile};
 
 #if defined(ARCH_X86_64) || defined(ARCH_X86)
         if (mCompileType == CppCompileType::GenerateAssemblyOnly) {
@@ -114,7 +131,8 @@ bool FileCompiler::prepareForCompile()
     mArguments += getCharsetArgument(mEncoding, fileType, mOnlyCheckSyntax);
     QString strFileType;
     switch(fileType) {
-    case FileType::GAS:
+    case FileType::ATTASM:
+    case FileType::INTELASM:
         mArguments += getCCompileArguments(mOnlyCheckSyntax);
         mArguments += getCIncludeArguments();
         mArguments += getProjectIncludeArguments();
@@ -141,7 +159,7 @@ bool FileCompiler::prepareForCompile()
     if (!mOnlyCheckSyntax)
         mArguments += getLibraryArguments(fileType);
 
-    if (fileType==FileType::GAS) {
+    if (isASMSourceFile(fileType)) {
         bool hasStart=false;
         QStringList lines=readFileToLines(mFilename);
         QSynedit::ASMSyntaxer syntaxer;
@@ -183,7 +201,7 @@ bool FileCompiler::prepareForCompile()
 
     log(tr("Processing %1 source file:").arg(strFileType));
     log("------------------");
-    log(tr("%1 Compiler: %2").arg(strFileType).arg(mCompiler));
+    log(tr("%1 Compiler: %2").arg(strFileType,mCompiler));
     QString command = escapeCommandForLog(mCompiler, mArguments);
     log(tr("Command: %1").arg(command));
     mDirectory = extractFileDir(mFilename);

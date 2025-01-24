@@ -62,7 +62,6 @@ local record env
     record C_System
         -- returns the architecture of Red Panda C++, name following `QSysInfo`
         -- e.g. "i386", "x86_64", "arm", "arm64", "riscv64", "loongarch64"
-        -- though unsupported, MSVC arm64ec is handled correctly (returns "arm64ec")
         appArch: function (): string
 
         -- returns the directory of Red Panda C++
@@ -83,11 +82,11 @@ local record env
         osArch: function (): string
 
         -- returns (1) stdout, (2) stderr and (3) exit status of the program
-        popen: function(prog: string, args: {string}, option: PopenOption | nil): string, string, PopenResult
+        popen: function(prog: string, args: {string}, option?: PopenOption): string, string, PopenResult
 
         -- returns supported application architectures by OS, name following `QSysInfo`
         -- e.g. {"i386", "x86_64", "arm64"}
-        -- Windows 10 1709 or later: accurate result
+        -- Windows 10 1709 or later: accurate result without "arm"
         -- Legacy Windows: hardcoded result, i.e. "i386" is always included even though WoW64 is not available
         -- macOS: accurate result supposed, but not tested
         -- Linux: osArch + appArch + QEMU user mode emulation, no multilib detection

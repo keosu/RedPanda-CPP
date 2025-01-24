@@ -29,8 +29,8 @@
 #include "systemconsts.h"
 
 #ifdef ENABLE_LUA_ADDON
-#include "addon/executor.h"
-#include "addon/runtime.h"
+#include "addon/luaexecutor.h"
+#include "addon/luaruntime.h"
 #endif
 
 ThemeManager::ThemeManager(QObject *parent) : QObject(parent)
@@ -241,7 +241,7 @@ AppTheme::AppTheme(const QString &filename, ThemeType type, ThemeCategory catego
         }
 #ifdef ENABLE_LUA_ADDON
         case ThemeType::Lua: {
-            obj = AddOn::ThemeExecutor{}(content, filename);
+            obj = AddOn::Lua::ThemeExecutor{}(content, filename);
             break;
         }
 #endif

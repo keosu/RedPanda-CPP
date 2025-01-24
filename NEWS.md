@@ -1,3 +1,68 @@
+Red Panda C++ Version 3.3
+  - enhancement: Auto indent contents in parenthesis.
+  - fix: Use "/" instead of "\" in the path of compile target. 
+  - fix: Qt 6 version crashed when debug.
+  - enhancement: Auto scale the main ui & choose theme dialog at the first run.
+  - fix: crash on statements like "x::a x;"
+  - enhancement: support literal operators.
+  - enhancement: Auto detect windows OEM code page in options / compiler / compiler set auto convert encoding option combobox.
+  - enhancement: Show oem codpages in compiler setting's encoding combobox.
+  - enhancement: niXman version MinGW GCC 14.2 compatibility.
+  - fix: Can't show definitions in iconv.h in the completion list.
+  - fix: Color scheme's "Indent Guide Line" item is not used by the editor.
+  - fix: "Indent Guide Line" item doesn't show in the option / editor / color scheme page.
+  - fix: Remove not used option "indent guide line" in the option / editor / general page. 
+  - enhancement: New option in "Environment" / "Appearance". To prevent mouse wheel change combobox's current selection.
+  - enhancement: Add "Rainbow indents"/"Rainbow indent guides" options in the option / editor / color scheme page.
+  - enhancement: Manually select file type.
+  - enhancement: When ctrl+click to open a C/C++ header file not suffixed with .h/.hh/.hpp etc., auto set its type to C/C++ header.
+  - enhancement: Add the option "Clear symbols in hidden source files" in option / environment / performance. (Turned on by default)
+  - enhancement: Treat .tcc file as C/C++ header file.
+  - enhancement: Save encoding / filetype /context file infos of last openned files.
+  - fix: Class browser is empty when ctrl+click to open a file.
+  - fix: Only press space key can exit consolepauser in linux. (by CyanoHao)
+  - fix: command line parameter escaping for consolepauser in windows. (by CyanoHao)
+  - enhancement: Localization for consolepauser.
+  - fix: Debugger not responding when debugging with gdb > 14.
+  - enhancement: Run programs in WSL.
+  - enhancement: Generate GIMPLE.
+  - enhancement: Russian Translation (by melkorbsd@github)
+  
+Red Panda C++ Version 3.2
+
+  - change: The way to calcuate astyle path.
+  - fix: Scroll bar arrow size not correct in the dark themes.
+  - fix: Don't auto scroll to the caret after undo/redo.
+  - fix: "bits/stdc++" is not openned in readonly mode.
+  - fix: astyle path error when reformat.
+  - fix: Slow when paste/replace bulk contents.
+  - fix: Crash in windows 7. (by CyanoHao)
+  - fix: While Control is pressed, can't start Drag&Drop by mouse.
+  - enhancement: Auto detect gdb ACP (by CyanoHao)
+  - fix:  When debugging project, the executing source file is not auto switched to. （#476）
+  - enhancement: Support Raw string literal with LR/UR/uR/u8R prefix.
+  - change: Copy/Export as html using less restrictive header.
+  - enhancement: Better gcc info detection (by CyanoHao)
+  - enhancement: Copy/Export as html with line numbers.
+  - enhancement: Ctrl+Drag/Drop to copy contents.
+  - enhancement: Don't display big input data file for problem cases. 
+  - fix: Can't switch to RedPanda-Cpp  by clicking on the application title bar when the options dialog is open.
+  - fix: Drag&Drop folder to IDE should be prohibited.
+  - fix: After dragging IDE to another screen that don't have the same DPI with the previous one, icon size are not correct.
+  - enhancement: Add copy compiler set tools button in the options dialog / compiler set panel.
+  - fix: Functions in seperate editing files all displayed in the function prototype list.
+  - enhancement: When debugging and the current stop position is not in source files, auto focus to the stack trace panel.
+  - enhancement: Adjust margin of the Search/Replace Dialog.
+  - enhancement: When Search/Replace invoked, auto focus the find inputbox. 
+  - fix: Problem case limit settings not correctly loaded.
+  - fix: Edit and switch editor out quickly may leave function tip wrongly appeared.
+  - fix: The function parameters' order in the generated doxygen doclet is wrong.
+  - enhancement: If current compiler set's compiler / debugger / make path is wrong, show a warning message box.
+  - enhancement: Display a cross before compiler set that has errors in compiler / debugger / make path.
+  - enhancement: Display a warning message if no compiler set is found at the first time RedPanda C++ runs.
+  - fix: Can't find the single word if the caret is inside it.
+  - fix: Search Dialog always returns to center each time starting a search.
+
 Red Panda C++ Version 3.1
 
   - fix: Can't correctly select in column mode.
@@ -7,6 +72,16 @@ Red Panda C++ Version 3.1
   - fix: In compiler options page, Can't save default stack size to 0MB.
   - enhancement: Support national flag emojis.
   - fix: Visibility for the interrupt action is not correctly updated.
+  - enhancement: Handle problems info from competitive-companion in background thread.
+  - enhancement: Handle time/memory limits in problems info from competitive-companion in background thread.
+  - enhancement: When problems info from competitive-companion received, show tips in the status bar.  
+  - fix: Layout for function tips.
+  - enhancement: More elements in the demo of editor color theme optiont page.
+  - fix: Mingw32-make doesn't work correctly if there are bash in the path.
+  - fix: All color scheme names are incorrectly displayed as bold, if the current one is a customed one.
+  - fix: Variables defined by using alias can't show completion info.
+  - enhancement: Support operator() overload.
+  - change: rename all "ansi" encoding to "system default".
 
 Red Panda C++ Version 3.0
 

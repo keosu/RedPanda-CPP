@@ -20,9 +20,9 @@
 #include <QTextStream>
 #include <QDebug>
 
-CppTokenizer::CppTokenizer()
+CppTokenizer::CppTokenizer():
+mLastTokenType{TokenType::None}
 {
-
 }
 
 void CppTokenizer::clear()
@@ -31,6 +31,7 @@ void CppTokenizer::clear()
     mBuffer.clear();
     mBufferStr.clear();
     mLastToken.clear();
+    mLastTokenType = TokenType::None;
     mUnmatchedBraces.clear();
     mUnmatchedBrackets.clear();
     mUnmatchedParenthesis.clear();
@@ -57,8 +58,9 @@ void CppTokenizer::tokenize(const QStringList &buffer)
     QString s = "";
     mCurrentLine = 1;
 
-    TokenType tokenType;
+    TokenType tokenType = TokenType::None;
     while (true) {
+        mLastTokenType = tokenType;
         mLastToken = s;
         s = getNextToken(&tokenType);
         simplify(s);
@@ -196,7 +198,7 @@ QString CppTokenizer::getNextToken(TokenType *pTokenType)
                 int delimPos = result.lastIndexOf(':');
                 if (delimPos >= 0) {
                     bool ok;
-                    mCurrentLine = QStringView(result.begin() + delimPos + 1, result.end()).toInt(&ok)-1; // fCurrLine is 0 based
+                    mCurrentLine = QStringView(result.constBegin() + delimPos + 1, result.constEnd()).toInt(&ok)-1; // fCurrLine is 0 based
                 }
             }
             done = (result != "");
@@ -222,6 +224,8 @@ QString CppTokenizer::getNextToken(TokenType *pTokenType)
 //                    skipPair('(',')');
 //            }
             done = (result != "");
+            if (done)
+                *pTokenType = TokenType::Identifier;
         } else if (isNumber()) {
             countLines();
             result = getNumber();
@@ -388,6 +392,18 @@ QString CppTokenizer::getNextToken(TokenType *pTokenType)
                     mCurrent++;
                     done = true;
                 }
+                break;
+            case '\"':
+                if ((*(mCurrent + 1) == '\"')
+                        && mLastTokenType == TokenType::Identifier
+                        && mLastToken == "operator"
+                        && isIdentChar(*(mCurrent + 2)) ) {
+                    countLines();
+                    result = "\"\"";
+                    mCurrent+=2;
+                    done = true;
+                } else
+                    advance();
                 break;
             default:
                 advance();

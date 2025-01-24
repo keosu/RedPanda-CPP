@@ -7,6 +7,11 @@ CONFIG += c++17
 CONFIG += nokey
 CONFIG += staticlib
 
+win32: CONFIG += lrelease_dosdevice
+else: CONFIG += lrelease
+CONFIG += embed_translations
+QMAKE_RESOURCE_FLAGS += -name $(QMAKE_TARGET)_${QMAKE_FILE_BASE}
+
 win32: {
     DEFINES += _WIN32_WINNT=0x0501
 }
@@ -27,4 +32,5 @@ HEADERS += qt_utils/utils.h \
 	qt_utils/charsetinfo.h
 
 TRANSLATIONS += \
-    qt_utils_zh_CN.ts
+    qt_utils_zh_CN.ts \
+    qt_utils_ru_RU.ts

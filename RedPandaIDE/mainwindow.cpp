@@ -17,7 +17,6 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QMessageBox>
-#include <QTextCodec>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -45,6 +44,7 @@
 #include <QUuid>
 #include <QScrollBar>
 #include <QTextDocumentFragment>
+#include <QActionGroup>
 
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
@@ -76,8 +76,8 @@
 #include "widgets/newclassdialog.h"
 #include "widgets/newheaderdialog.h"
 #ifdef ENABLE_LUA_ADDON
-#include "addon/executor.h"
-#include "addon/runtime.h"
+#include "addon/luaexecutor.h"
+#include "addon/luaruntime.h"
 #endif
 #ifdef ENABLE_VCS
 #include "vcs/gitmanager.h"
@@ -107,11 +107,6 @@
 #include <windows.h>
 #endif
 
-static const char *Translation[] =
-{
-  QT_TRANSLATE_NOOP("QFileSystemModel", "<b>The name \"%1\" cannot be used.</b><p>Try using another name, with fewer characters or no punctuation marks.")
-};
-
 static int findTabIndex(QTabWidget* tabWidget , QWidget* w) {
     for (int i=0;i<tabWidget->count();i++) {
         if (w==tabWidget->widget(i))
@@ -139,9 +134,20 @@ MainWindow::MainWindow(QWidget *parent)
       mOpenningFiles{false},
       mSystemTurnedOff{false},
       mCompileIssuesState{CompileIssuesState::None}
-
 {
     ui->setupUi(this);
+
+    /** Msys2 MinGW 64 Qt 6.8.0 fix: Crash when debug **/
+// #if defined(QT_DEBUG) && QT_VERSION_MAJOR == 6 && QT_VERSION_MINOR == 8
+//     QFont font(pSettings->environment().interfaceFont());
+//     font.setPixelSize(pointToPixel(pSettings->environment().interfaceFontSize()));
+//     font.setStyleStrategy(QFont::PreferAntialias);
+//     qApp->setFont(font);
+//     this->setFont(font);
+// #endif
+    /** **/
+    resize(960, 628);
+
     ui->cbProblemCaseValidateType->blockSignals(true);
     ui->cbProblemCaseValidateType->addItem(tr("Exact"));
     ui->cbProblemCaseValidateType->addItem(tr("Ignore leading/trailing spaces"));
@@ -155,9 +161,9 @@ MainWindow::MainWindow(QWidget *parent)
     // status bar
 
     //statusBar takes the owner ships
-    mFileInfoStatus=new QLabel();
-    mFileEncodingStatus = new LabelWithMenu();
-    mFileModeStatus = new QLabel();
+    mFileInfoStatus=new QLabel(this);
+    mFileEncodingStatus = new LabelWithMenu(this);
+    mFileModeStatus = new QLabel(this);
 
     mFileInfoStatus->setStyleSheet("margin-left:5px; margin-right:5px");
     mFileEncodingStatus->setStyleSheet("margin-left:5px; margin-right:5px");
@@ -167,11 +173,10 @@ MainWindow::MainWindow(QWidget *parent)
     ui->statusbar->insertPermanentWidget(0,mFileModeStatus);
     ui->statusbar->insertPermanentWidget(0,mFileEncodingStatus);
     ui->statusbar->insertPermanentWidget(0,mFileInfoStatus);
-    //delete in the destructor
     mEditorList = new EditorList(ui->EditorTabsLeft,
                                  ui->EditorTabsRight,
                                  ui->splitterEditorPanel,
-                                 ui->EditorPanel);
+                                 ui->EditorPanel, this);
     connect(mEditorList, &EditorList::editorRenamed,
             this, &MainWindow::onEditorRenamed);
     connect(mEditorList, &EditorList::editorClosed,
@@ -191,7 +196,7 @@ MainWindow::MainWindow(QWidget *parent)
     mVisitHistoryManager->load();
 
     //toolbar takes the owner
-    mCompilerSet = new QComboBox();
+    mCompilerSet = new QComboBox(this);
     mCompilerSet->setMinimumWidth(200);
     mCompilerSet->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     ui->toolbarCompilerSet->insertWidget(ui->actionCompiler_Options, mCompilerSet);
@@ -200,8 +205,13 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onCompilerSetChanged);
     //updateCompilerSet();
 
-    mCompilerManager = std::make_shared<CompilerManager>();
-    mDebugger = std::make_shared<Debugger>();
+    mCompilerManager = new CompilerManager(this);
+    connect(mCompilerManager, &CompilerManager::compileFinished,
+            this, &MainWindow::onCompileFinished);
+
+    mDebugger = new Debugger(this);
+    connect(mDebugger, &Debugger::debugFinished, this,
+            &MainWindow::onDebugFinished);
 
     m=ui->tblBreakpoints->selectionModel();
     ui->tblBreakpoints->setModel(mDebugger->breakpointModel().get());
@@ -289,7 +299,7 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onDebugMemoryAddressInput);
 
     mTodoParser = std::make_shared<TodoParser>();
-    mSymbolUsageManager = std::make_shared<SymbolUsageManager>();
+    mSymbolUsageManager = new SymbolUsageManager{this};
     try {
         mSymbolUsageManager->load();
     } catch (FileError &e) {
@@ -298,7 +308,7 @@ MainWindow::MainWindow(QWidget *parent)
                          e.reason());
     }
 
-    mCodeSnippetManager = std::make_shared<CodeSnippetsManager>();
+    mCodeSnippetManager = new CodeSnippetsManager{this};
     try {
         mCodeSnippetManager->load();
     } catch (FileError &e) {
@@ -306,7 +316,7 @@ MainWindow::MainWindow(QWidget *parent)
                              tr("Error"),
                              e.reason());
     }
-    mToolsManager = std::make_shared<ToolsManager>();
+    mToolsManager = new ToolsManager{this};
     try {
         mToolsManager->load();
     } catch (FileError &e) {
@@ -314,7 +324,7 @@ MainWindow::MainWindow(QWidget *parent)
                              tr("Error"),
                              e.reason());
     }
-    mBookmarkModel = std::make_shared<BookmarkModel>();
+    mBookmarkModel = new BookmarkModel{this};
     try {
         mBookmarkModel->loadBookmarks(includeTrailingPathDelimiter(pSettings->dirs().config())
                          +DEV_BOOKMARK_FILE);
@@ -325,37 +335,41 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     m=ui->tableBookmark->selectionModel();
-    ui->tableBookmark->setModel(mBookmarkModel.get());
+    ui->tableBookmark->setModel(mBookmarkModel);
     delete m;
 
-    mSearchResultTreeModel = std::make_shared<SearchResultTreeModel>(&mSearchResultModel);
-    mSearchResultListModel = std::make_shared<SearchResultListModel>(&mSearchResultModel);
-    mSearchViewDelegate = std::make_shared<SearchResultTreeViewDelegate>(mSearchResultTreeModel);
+    mSearchResultModel = new SearchResultModel{this};
+    mSearchResultTreeModel = new SearchResultTreeModel{mSearchResultModel, this};
+    mSearchResultListModel = new SearchResultListModel{mSearchResultModel, this};
+    mSearchViewDelegate = new SearchResultTreeViewDelegate{mSearchResultTreeModel, this};
 
-    ui->cbSearchHistory->setModel(mSearchResultListModel.get());
+    ui->cbSearchHistory->setModel(mSearchResultListModel);
 
     m=ui->searchView->selectionModel();
-    ui->searchView->setModel(mSearchResultTreeModel.get());
+    ui->searchView->setModel(mSearchResultTreeModel);
     delete m;
-    ui->searchView->setItemDelegate(mSearchViewDelegate.get());
+    ui->searchView->setItemDelegate(mSearchViewDelegate);
     m=ui->tableTODO->selectionModel();
-    ui->tableTODO->setModel(&mTodoModel);
+    mTodoModel = new TodoModel{this};
+    ui->tableTODO->setModel(mTodoModel);
     delete m;
-    connect(mSearchResultTreeModel.get() , &QAbstractItemModel::modelReset,
+    connect(mSearchResultTreeModel, &QAbstractItemModel::modelReset,
             ui->searchView,&QTreeView::expandAll);
     ui->replacePanel->setVisible(false);
     ui->tabProblem->setEnabled(false);
 
     //problem set
     mOJProblemSetNameCounter=1;
-    mOJProblemSetModel.rename(tr("Problem Set %1").arg(mOJProblemSetNameCounter));
+    mOJProblemSetModel = new OJProblemSetModel{this};
+    mOJProblemSetModel->rename(tr("Problem Set %1").arg(mOJProblemSetNameCounter));
 
     m=ui->lstProblemSet->selectionModel();
-    ui->lstProblemSet->setModel(&mOJProblemSetModel);
+    ui->lstProblemSet->setModel(mOJProblemSetModel);
     delete m;
 
+    mOJProblemModel = new OJProblemModel{this};
     m=ui->tblProblemCases->selectionModel();
-    ui->tblProblemCases->setModel(&mOJProblemModel);
+    ui->tblProblemCases->setModel(mOJProblemModel);
     delete m;
     connect(ui->lstProblemSet->selectionModel(),
             &QItemSelectionModel::currentRowChanged,
@@ -363,19 +377,19 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->tblProblemCases->selectionModel(),
             &QItemSelectionModel::currentRowChanged,
             this, &MainWindow::onProblemCaseIndexChanged);
-    connect(&mOJProblemSetModel, &OJProblemSetModel::problemNameChanged,
+    connect(mOJProblemSetModel, &OJProblemSetModel::problemNameChanged,
             this , &MainWindow::onProblemNameChanged);
     ui->pbProblemCases->setVisible(false);
     connect(&mCCHandler, &CompetitiveCompanionHandler::newProblemReceived,
             this, &MainWindow::onNewProblemReceived);
 
-    connect(&mOJProblemModel, &OJProblemModel::dataChanged,
+    connect(mOJProblemModel, &OJProblemModel::dataChanged,
             this, &MainWindow::updateProblemTitle);
     try {
         int currentIndex=-1;
-        mOJProblemSetModel.load(currentIndex);
+        mOJProblemSetModel->load(currentIndex);
         if (currentIndex>=0) {
-            QModelIndex index = mOJProblemSetModel.index(currentIndex,0);
+            QModelIndex index = mOJProblemSetModel->index(currentIndex,0);
             ui->lstProblemSet->setCurrentIndex(index);
             ui->lstProblemSet->scrollTo(index);
         }
@@ -386,22 +400,23 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     //files view
+    mFileSystemModel = new CustomFileSystemModel{this};
     m=ui->treeFiles->selectionModel();
-    ui->treeFiles->setModel(&mFileSystemModel);
+    ui->treeFiles->setModel(mFileSystemModel);
     delete m;
     // connect(&mFileSystemModel, &QFileSystemModel::layoutChanged,
     //         this, &MainWindow::onFileSystemModelLayoutChanged, Qt::QueuedConnection);
-    connect(&mFileSystemModel, &QFileSystemModel::fileRenamed,
+    connect(mFileSystemModel, &QFileSystemModel::fileRenamed,
             this, &MainWindow::onFileSystemModelLayoutChanged, Qt::QueuedConnection);
-    connect(&mFileSystemModel, &QFileSystemModel::fileRenamed,
+    connect(mFileSystemModel, &QFileSystemModel::fileRenamed,
             this, &MainWindow::onFileRenamedInFileSystemModel);
-    mFileSystemModel.setReadOnly(false);
-    mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
+    mFileSystemModel->setReadOnly(false);
+    mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
 
-    mFileSystemModel.setNameFilters(pSystemConsts->defaultFileNameFilters());
-    mFileSystemModel.setNameFilterDisables(true);
+    mFileSystemModel->setNameFilters(pSystemConsts->defaultFileNameFilters());
+    mFileSystemModel->setNameFilterDisables(true);
     //setFilesViewRoot(pSettings->environment().currentFolder());
-    for (int i=1;i<mFileSystemModel.columnCount();i++) {
+    for (int i=1;i<mFileSystemModel->columnCount();i++) {
         ui->treeFiles->hideColumn(i);
     }
     FilenameEditDelegate *filenameEditDelegate = new FilenameEditDelegate(ui->treeFiles);
@@ -414,12 +429,13 @@ MainWindow::MainWindow(QWidget *parent)
     //class browser
     ui->classBrowser->setUniformRowHeights(true);
     m=ui->classBrowser->selectionModel();
-    ui->classBrowser->setModel(&mClassBrowserModel);
+    mClassBrowserModel = new ClassBrowserModel{this};
+    ui->classBrowser->setModel(mClassBrowserModel);
     delete m;
 
-    connect(&mClassBrowserModel, &ClassBrowserModel::refreshStarted,
+    connect(mClassBrowserModel, &ClassBrowserModel::refreshStarted,
             this, &MainWindow::onClassBrowserRefreshStart);
-    connect(&mClassBrowserModel, &ClassBrowserModel::refreshEnd,
+    connect(mClassBrowserModel, &ClassBrowserModel::refreshEnd,
             this, &MainWindow::onClassBrowserRefreshEnd);
 
     connect(&mFileSystemWatcher,&QFileSystemWatcher::fileChanged,
@@ -428,12 +444,12 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onDirChanged);
 
     mStatementColors = std::make_shared<QHash<StatementKind, PColorSchemeItem> >();
-    mCompletionPopup = std::make_shared<CodeCompletionPopup>();
+    mCompletionPopup = new CodeCompletionPopup(this);
     mCompletionPopup->setColors(mStatementColors);
-    mHeaderCompletionPopup = std::make_shared<HeaderCompletionPopup>();
-    mFunctionTip = std::make_shared<FunctionTooltipWidget>();
+    mHeaderCompletionPopup = new HeaderCompletionPopup(this);
+    mFunctionTip = new FunctionTooltipWidget(this);
 
-    mClassBrowserModel.setColors(mStatementColors);
+    mClassBrowserModel->setColors(mStatementColors);
 
     connect(&mAutoSaveTimer, &QTimer::timeout,
             this, &MainWindow::onAutoSaveTimeout);
@@ -693,6 +709,12 @@ void MainWindow::updateEditorActions(const Editor *e)
         ui->actionFind_references->setEnabled(false);
 
         ui->actionMove_To_Other_View->setEnabled(false);
+        ui->actionC_C_Header->setEnabled(false);
+        ui->actionC_File->setEnabled(false);
+        ui->actionCPP_File->setEnabled(false);
+        ui->actionATT_ASM->setEnabled(false);
+        ui->actionIntel_ASM->setEnabled(false);
+        ui->actionText_File->setEnabled(false);
     } else {
         ui->actionCopy->setEnabled(true);
         ui->actionCut->setEnabled(true);
@@ -774,8 +796,16 @@ void MainWindow::updateEditorActions(const Editor *e)
         ui->actionGoto_Definition->setEnabled(e->parser()!=nullptr);
         ui->actionFind_references->setEnabled(e->parser()!=nullptr);
         ui->actionMove_To_Other_View->setEnabled(editorList()->pageCount()>1);
+
+        ui->actionC_C_Header->setEnabled(true);
+        ui->actionC_File->setEnabled(true);
+        ui->actionCPP_File->setEnabled(true);
+        ui->actionATT_ASM->setEnabled(true);
+        ui->actionIntel_ASM->setEnabled(true);
+        ui->actionText_File->setEnabled(true);
     }
 
+    updateFileTypeActions(e);
     updateEncodingActions(e);
     updateCompileActions(e);
     updateCompilerSet(e);
@@ -815,6 +845,7 @@ void MainWindow::updateCompileActions(const Editor *e)
         ui->actionRun->setEnabled(false);
         ui->actionRebuild->setEnabled(false);
         ui->actionGenerate_Assembly->setEnabled(false);
+        ui->actionGenerate_GIMPLE->setEnabled(false);
         ui->actionDebug->setEnabled(false);
         mProblem_RunAllCases->setEnabled(false);
     } else {
@@ -848,13 +879,16 @@ void MainWindow::updateCompileActions(const Editor *e)
                         canRun = canCompile;
                         canDebug = set->canDebug();
                         break;
-                    case FileType::GAS:
+                    case FileType::ATTASM:
+                    case FileType::INTELASM:
                         if (set->compilerType()==CompilerType::GCC
                                 || set->compilerType()==CompilerType::GCC_UTF8) {
                             canCompile = true;
                             canRun = canCompile;
                             canDebug = set->canDebug();
                         }
+                        break;
+                    default:
                         break;
                     }
                 } else {
@@ -881,8 +915,9 @@ void MainWindow::updateCompileActions(const Editor *e)
         ui->actionRun->setEnabled(canRun);
         ui->actionRebuild->setEnabled(canCompile);
         ui->actionGenerate_Assembly->setEnabled(canGenerateAssembly);
+        ui->actionGenerate_GIMPLE->setEnabled(canGenerateAssembly);
         ui->actionDebug->setEnabled(canDebug);
-        mProblem_RunAllCases->setEnabled(canRun && mOJProblemModel.count()>0);
+        mProblem_RunAllCases->setEnabled(canRun && mOJProblemModel->count()>0);
     }
     if (!mDebugger->executing()) {
         disableDebugActions();
@@ -991,6 +1026,41 @@ void MainWindow::updateEditorColorSchemes()
                                                headerFolderColor);
 }
 
+void MainWindow::updateFileTypeActions(const Editor* e)
+{
+    ui->actionC_C_Header->setChecked(false);
+    ui->actionC_File->setChecked(false);
+    ui->actionCPP_File->setChecked(false);
+    ui->actionATT_ASM->setChecked(false);
+    ui->actionIntel_ASM->setChecked(false);
+    ui->actionText_File->setChecked(false);
+    if (!e)
+        return;
+    switch(e->fileType()) {
+    case FileType::CCppHeader:
+        ui->actionC_C_Header->setChecked(true);
+        break;
+    case FileType::CSource:
+        ui->actionC_File->setChecked(true);
+        break;
+    case FileType::CppSource:
+        ui->actionCPP_File->setChecked(true);
+        break;
+    case FileType::ATTASM:
+        ui->actionATT_ASM->setChecked(true);
+        break;
+    case FileType::INTELASM:
+        ui->actionIntel_ASM->setChecked(true);
+        break;
+    case FileType::Text:
+        ui->actionText_File->setChecked(true);
+        break;
+    default:
+        break;
+    }
+
+}
+
 void MainWindow::applySettings()
 {
     ThemeManager themeManager;
@@ -1031,7 +1101,7 @@ void MainWindow::applySettings()
     font.setStyleStrategy(QFont::PreferAntialias);
     qApp->setFont(font);
     this->setFont(font);
-    for (QWidget* p:findChildren<QWidget*>()) {
+    foreach (QWidget* p, findChildren<QWidget*>()) {
         if (mCPUDialog && (p==mCPUDialog || mCPUDialog->isAncestorOf(p)))
             continue;
         p->setFont(font);
@@ -1078,7 +1148,7 @@ void MainWindow::applySettings()
                 calIconSize(
                     pSettings->environment().interfaceFont(),
                     pSettings->environment().interfaceFontSize()));
-    if (!mFileSystemModel.rootPath().isEmpty() && mFileSystemModel.rootPath()!=".")
+    if (!mFileSystemModel->rootPath().isEmpty() && mFileSystemModel->rootPath()!=".")
         setFilesViewRoot(pSettings->environment().currentFolder());
 //    for (int i=0;i<ui->cbFilesPath->count();i++) {
 //        ui->cbFilesPath->setItemIcon(i,pIconsManager->getIcon(IconsManager::FILESYSTEM_GIT));
@@ -1133,6 +1203,17 @@ void MainWindow::applyUISettings()
         ui->tabMessages->setShrinkedFlag(true);
     if (settings.shrinkExplorerTabs())
         ui->tabExplorer->setShrinkedFlag(true);
+#if defined(Q_OS_WIN) && QT_VERSION_MAJOR == 5
+    if (settings.mainWindowGeometry().isEmpty()) {
+        //first run, adjust size with dpi
+        int w = width()*screenDPI()/96;
+        int h = height()*screenDPI()/96;
+        resize(w,h);
+        ui->tabMessages->setBeforeShrinkSize(settings.messagesTabsSize()*screenDPI()/96);
+        ui->tabExplorer->setBeforeShrinkSize(settings.explorerTabsSize()*screenDPI()/96);
+    }
+
+#endif
 }
 
 QFileSystemWatcher *MainWindow::fileSystemWatcher()
@@ -1163,20 +1244,24 @@ void MainWindow::setActiveBreakpoint(QString fileName, int Line, bool setFocus)
     Editor *e = openFile(fileName, false);
     if (e!=nullptr) {
         e->setActiveBreakpointFocus(Line,setFocus);
+        e->activate(false);
         if (setFocus) {
             activateWindow();
         }
     } else {
+        showHideMessagesTab(ui->tabDebug, true);
+        ui->debugViews->setCurrentWidget(ui->tabStackTrace);
+        ui->debugViews->setFocus();
+    // ui->tblStackTrace->selectRow(0);
     //   showCPUInfoDialog();
     }
     return;
 }
 
-void MainWindow::updateDPI(int oldDPI, int /*newDPI*/)
+void MainWindow::updateDPI(int oldDPI, int newDPI)
 {
-    //applySettings();
-    if (oldDPI<1)
-        oldDPI = 1;
+    Q_UNUSED(oldDPI)
+    Q_UNUSED(newDPI)
 }
 
 void MainWindow::onFileSaved(const QString &path, bool inProject)
@@ -1187,7 +1272,7 @@ void MainWindow::onFileSaved(const QString &path, bool inProject)
         if (inProject && mProject && mProject->model()->iconProvider()->VCSRepository()->hasRepository(branch)) {
             mProject->model()->refreshIcon(path);
         }
-        QModelIndex index =  mFileSystemModel.index(path);
+        QModelIndex index =  mFileSystemModel->index(path);
         if (index.isValid()) {
             if (!inProject) {
                 if ( (isCFile(path) || isHFile(path))
@@ -1198,7 +1283,7 @@ void MainWindow::onFileSaved(const QString &path, bool inProject)
             }
 //            qDebug()<<"update icon provider";
             mFileSystemModelIconProvider.update();
-            mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
+            mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
             ui->treeFiles->update(index);
         }
     }
@@ -1207,6 +1292,24 @@ void MainWindow::onFileSaved(const QString &path, bool inProject)
     Q_UNUSED(inProject);
 #endif
     //updateForEncodingInfo();
+}
+
+void MainWindow::onDebugFinished()
+{
+    if (cpuDialog()!=nullptr) {
+        cpuDialog()->close();
+    }
+
+    // Free resources
+    removeActiveBreakpoints();
+
+    ui->txtLocals->clear();
+
+    updateAppTitle();
+
+    updateDebugEval("");
+
+    updateEditorActions();
 }
 
 void MainWindow::executeTool(PToolItem item)
@@ -1218,6 +1321,7 @@ void MainWindow::executeTool(PToolItem item)
     Editor *e;
     QByteArray inputContent;
     QByteArray output;
+    QString errorMessage;
     clearToolsOutput();
     switch(item->inputOrigin) {
     case ToolItemInputOrigin::None:
@@ -1251,18 +1355,24 @@ void MainWindow::executeTool(PToolItem item)
             QString cmd="cmd";
             QStringList args{"/C",file.fileName()};
             command = escapeCommandForPlatformShell(cmd, args);
-            output = runAndGetOutput(cmd, workDir, args, inputContent);
+            auto [o, _, em] = runAndGetOutput(cmd, workDir, args, inputContent);
+            output = o;
+            errorMessage = em;
         }
     } else {
 #endif
         command = escapeCommandForPlatformShell(program, params);
-        output = runAndGetOutput(program, workDir, params, inputContent);
+        auto [o, _, em] = runAndGetOutput(program, workDir, params, inputContent);
+        output = o;
+        errorMessage = em;
 #ifdef Q_OS_WIN
     }
 #endif
     switch(item->outputTarget) {
     case ToolItemOutputTarget::RedirectToToolsOutputPanel:
         logToolsOutput(tr(" - Command: %1").arg(command));
+        if (!errorMessage.isEmpty())
+            logToolsOutput(errorMessage);
         logToolsOutput("");
         logToolsOutput(byteArrayToString(output, item->isUTF8));
         stretchMessagesPanel(true);
@@ -1273,19 +1383,20 @@ void MainWindow::executeTool(PToolItem item)
     case ToolItemOutputTarget::RepalceWholeDocument:
         e=mEditorList->getEditor();
         if (e)
-            e->replaceContent(byteArrayToString(output, item->isUTF8));
+            e->replaceContent(errorMessage + byteArrayToString(output, item->isUTF8));
         break;
     case ToolItemOutputTarget::ReplaceCurrentSelection:
         e=mEditorList->getEditor();
         if (e)
-            e->setSelText(byteArrayToString(output, item->isUTF8));
+            e->setSelText(errorMessage + byteArrayToString(output, item->isUTF8));
         break;
     }
 }
 
 int MainWindow::calIconSize(const QString &fontName, int fontPointSize)
 {
-    QFont font(fontName,fontPointSize);
+    QFont font(fontName);
+    font.setPixelSize(pointToPixel(fontPointSize));
     QFontMetrics metrics(font);
     return metrics.ascent();
 }
@@ -1386,7 +1497,7 @@ void MainWindow::updateAppTitle(const Editor *e)
                                     .arg(str,appName));
         }
     } else if (mProject) {
-        QString str,str2;
+        QString str;
         if (mProject->modified())
             str = mProject->name() + " [*]";
         else
@@ -1495,57 +1606,56 @@ void MainWindow::updateClassBrowserForEditor(Editor *editor)
 {
 
     if (mQuitting) {
-        mClassBrowserModel.beginUpdate();
-        mClassBrowserModel.setParser(nullptr);
-        mClassBrowserModel.setCurrentFile("");
-        mClassBrowserModel.endUpdate();
+        mClassBrowserModel->beginUpdate();
+        mClassBrowserModel->setParser(nullptr);
+        mClassBrowserModel->setCurrentFile("");
+        mClassBrowserModel->endUpdate();
         return;
     }
 
     if (editor) {
-        if ((mClassBrowserModel.currentFile() == editor->filename())
-             && (mClassBrowserModel.parser() == editor->parser()))
+        if ((mClassBrowserModel->currentFile() == editor->filename())
+             && (mClassBrowserModel->parser() == editor->parser()))
                 return;
 
-        if (mClassBrowserModel.parser() == editor->parser() && mClassBrowserModel.classBrowserType()==ProjectClassBrowserType::WholeProject) {
-            mClassBrowserModel.setCurrentFile(editor->filename());
+        if (mClassBrowserModel->parser() == editor->parser() && mClassBrowserModel->classBrowserType()==ProjectClassBrowserType::WholeProject) {
+            mClassBrowserModel->setCurrentFile(editor->filename());
             return;
         }
 
         if (editor->inProject() && !mProject) {
             //project is in creation
-            mClassBrowserModel.setCurrentFile(editor->filename());
+            mClassBrowserModel->setCurrentFile(editor->filename());
             return;
         }
 
-
-        mClassBrowserModel.beginUpdate();
-        mClassBrowserModel.setParser(editor->parser());
+        mClassBrowserModel->beginUpdate();
+        mClassBrowserModel->setParser(editor->parser());
         if (editor->inProject()) {
-            mClassBrowserModel.setClassBrowserType(mProject->options().classBrowserType);
+            mClassBrowserModel->setClassBrowserType(mProject->options().classBrowserType);
         } else {
-            mClassBrowserModel.setClassBrowserType(ProjectClassBrowserType::CurrentFile);
+            mClassBrowserModel->setClassBrowserType(ProjectClassBrowserType::CurrentFile);
         }
-        mClassBrowserModel.setCurrentFile(editor->filename());
-        mClassBrowserModel.endUpdate();
+        mClassBrowserModel->setCurrentFile(editor->filename());
+        mClassBrowserModel->endUpdate();
     } else if (mProject) {
-        if (mClassBrowserModel.parser() == mProject->cppParser()) {
-            mClassBrowserModel.beginUpdate();
-            mClassBrowserModel.setCurrentFile("");
-            mClassBrowserModel.endUpdate();
+        if (mClassBrowserModel->parser() == mProject->cppParser()) {
+            mClassBrowserModel->beginUpdate();
+            mClassBrowserModel->setCurrentFile("");
+            mClassBrowserModel->endUpdate();
             return;
         }
 
-        mClassBrowserModel.beginUpdate();
-        mClassBrowserModel.setParser(mProject->cppParser());
-        mClassBrowserModel.setClassBrowserType(mProject->options().classBrowserType);
-        mClassBrowserModel.setCurrentFile("");
-        mClassBrowserModel.endUpdate();
+        mClassBrowserModel->beginUpdate();
+        mClassBrowserModel->setParser(mProject->cppParser());
+        mClassBrowserModel->setClassBrowserType(mProject->options().classBrowserType);
+        mClassBrowserModel->setCurrentFile("");
+        mClassBrowserModel->endUpdate();
     } else {
-        mClassBrowserModel.beginUpdate();
-        mClassBrowserModel.setParser(nullptr);
-        mClassBrowserModel.setCurrentFile("");
-        mClassBrowserModel.endUpdate();
+        mClassBrowserModel->beginUpdate();
+        mClassBrowserModel->setParser(nullptr);
+        mClassBrowserModel->setCurrentFile("");
+        mClassBrowserModel->endUpdate();
         return;
     }
 }
@@ -1569,11 +1679,6 @@ void MainWindow::updateShortcuts()
     // foreach(QAction* action, listShortCutableActions())
     //     qDebug()<<action->text()<<action->objectName();
     manager.applyTo(listShortCutableActions());
-}
-
-QPlainTextEdit *MainWindow::txtLocals()
-{
-    return ui->txtLocals;
 }
 
 QMenuBar *MainWindow::menuBar() const
@@ -1695,17 +1800,22 @@ void MainWindow::openFiles(const QStringList &files)
     }
 }
 
-Editor* MainWindow::openFile(QString filename, bool activate, QTabWidget* page)
+Editor* MainWindow::openFile(QString filename, bool activate, QTabWidget* page, FileType fileType, const QString& contextFile)
 {
     if (!fileExists(filename))
         return nullptr;
 
     QFileInfo info=QFileInfo(filename);
+    if (info.isDir())
+        return nullptr;
+
     if (info.isAbsolute())
         filename = info.absoluteFilePath();
 
     Editor* editor = mEditorList->getOpenedEditorByFilename(filename);
     if (editor!=nullptr) {
+        editor->setContextFile(contextFile);
+        editor->setFileType(fileType);
         if (activate) {
             editor->activate();
         }
@@ -1726,17 +1836,20 @@ Editor* MainWindow::openFile(QString filename, bool activate, QTabWidget* page)
         }
         bool inProject = (mProject && unit);
         QByteArray encoding = unit ? unit->encoding() :
-                                     (pSettings->editor().autoDetectFileEncoding()? ENCODING_AUTO_DETECT : pSettings->editor().defaultEncoding());
+                                     (pSettings->editor().autoDetectFileEncoding() ? QByteArray(ENCODING_AUTO_DETECT) : pSettings->editor().defaultEncoding());
         Project * pProject = (inProject?mProject.get():nullptr);
         if (pProject && encoding==ENCODING_PROJECT)
             encoding=pProject->options().encoding;
         editor = mEditorList->newEditor(filename,encoding,
-                                    pProject, false, page);
+                                        fileType, contextFile,
+                                        pProject, false, page);
 //        if (mProject) {
 //            mProject->associateEditorToUnit(editor,unit);
 //        }
         if (activate) {
             editor->activate();
+        } else {
+            updateEditorActions();
         }
         if (mEditorList->pageCount()>1 && oldEditor)
             mEditorList->closeEditor(oldEditor);
@@ -1795,7 +1908,7 @@ void MainWindow::openProject(QString filename, bool openFiles)
         ui->tabExplorer->setCurrentWidget(ui->tabProject);
 
     // Only update class browser once
-    mClassBrowserModel.beginUpdate();
+    mClassBrowserModel->beginUpdate();
     mProject = Project::load(filename,mEditorList,&mFileSystemWatcher);
     updateProjectView();
     ui->projectView->expand(
@@ -1821,7 +1934,7 @@ void MainWindow::openProject(QString filename, bool openFiles)
     mDebugger->loadForProject(
                 changeFileExt(mProject->filename(), PROJECT_DEBUG_EXT),
                 mProject->directory());
-    mTodoModel.setIsForProject(true);
+    mTodoModel->setIsForProject(true);
     if (pSettings->editor().parseTodos())
         mTodoParser->parseFiles(mProject->unitFiles());
 
@@ -1845,7 +1958,7 @@ void MainWindow::openProject(QString filename, bool openFiles)
     updateAppTitle();
     updateCompilerSet();
     updateClassBrowserForEditor(e);
-    mClassBrowserModel.endUpdate();
+    mClassBrowserModel->endUpdate();
     if (oldEditor)
         mEditorList->closeEditor(oldEditor);
     setupSlotsForProject();
@@ -1854,7 +1967,7 @@ void MainWindow::openProject(QString filename, bool openFiles)
 
 void MainWindow::changeOptions(const QString &widgetName, const QString &groupName)
 {
-    PSettingsDialog settingsDialog = SettingsDialog::optionDialog();
+    PSettingsDialog settingsDialog = SettingsDialog::optionDialog(this);
     if (!groupName.isEmpty()) {
         settingsDialog->setCurrentWidget(widgetName, groupName);
     }
@@ -1886,8 +1999,7 @@ void MainWindow::changeProjectOptions(const QString &widgetName, const QString &
     if (!mProject)
         return;
 //    int oldCompilerSet = mProject->options().compilerSet;
-    QString oldName = mProject->name();
-    PSettingsDialog dialog = SettingsDialog::projectOptionDialog();
+    PSettingsDialog dialog = SettingsDialog::projectOptionDialog(this);
     if (!groupName.isEmpty()) {
         dialog->setCurrentWidget(widgetName, groupName);
     }
@@ -1904,8 +2016,13 @@ void MainWindow::updateCompilerSet(const Editor *e)
 {
     mCompilerSet->blockSignals(true);
     mCompilerSet->clear();
+    QIcon errorIcon = pIconsManager->getIcon(IconsManager::ACTION_MISC_CROSS);
     for (size_t i=0;i<pSettings->compilerSets().size();i++) {
-        mCompilerSet->addItem(pSettings->compilerSets().getSet(i)->name());
+        Settings::PCompilerSet set=pSettings->compilerSets().getSet(i);
+        if (set->findErrors().isEmpty())
+            mCompilerSet->addItem(set->name());
+        else
+            mCompilerSet->addItem(errorIcon, set->name());
     }
     int index=pSettings->compilerSets().defaultIndex();
     if (mProject) {
@@ -1959,17 +2076,23 @@ void MainWindow::updateActionIcons()
     ui->toolbarCompile->setIconSize(iconSize);
     ui->toolbarDebug->setIconSize(iconSize);
     ui->toolbarCompilerSet->setIconSize(iconSize);
-    for (QToolButton* btn: mClassBrowserToolbar->findChildren<QToolButton *>()) {
+    foreach (QToolButton* btn, mClassBrowserToolbar->findChildren<QToolButton *>()) {
         btn->setIconSize(iconSize);
     }
-    for (QToolButton* btn: ui->panelFiles->findChildren<QToolButton *>()) {
+    foreach (QToolButton* btn, ui->panelFiles->findChildren<QToolButton *>()) {
         btn->setIconSize(iconSize);
     }
-    for (QToolButton* btn: ui->tabProblemSet->findChildren<QToolButton *>()) {
+    foreach (QToolButton* btn, ui->tabProblemSet->findChildren<QToolButton *>()) {
         btn->setIconSize(iconSize);
     }
-    for (QToolButton* btn: ui->panelProblemCaseInfo->findChildren<QToolButton *>()) {
+    foreach (QToolButton* btn, ui->panelProblemCaseInfo->findChildren<QToolButton *>()) {
         btn->setIconSize(iconSize);
+    }
+
+    for(int i=0;i<mCompilerSet->count();i++) {
+        if (!mCompilerSet->itemIcon(i).isNull()) {
+            mCompilerSet->setItemIcon(i, pIconsManager->getIcon(IconsManager::ACTION_MISC_CROSS));
+        }
     }
 
     ui->tabExplorer->setIconSize(iconSize);
@@ -2154,12 +2277,9 @@ void MainWindow::checkSyntaxInBack(Editor *e)
     }
 
     //not c or cpp file
-    FileType fileType = getFileType(e->filename());
-    if (fileType != FileType::CSource
-            && fileType != FileType::CppSource
-            && fileType != FileType::CHeader
-            && fileType != FileType::CppHeader
-            && fileType != FileType::GAS
+    FileType fileType = e->fileType();
+    if (!isC_CPP_ASMSourceFile(fileType)
+            && !isC_CPPHeaderFile(fileType)
             )
         return;
     if (mCompilerManager->backgroundSyntaxChecking())
@@ -2271,6 +2391,9 @@ bool MainWindow::compile(bool rebuild, CppCompileType compileType)
                     case CppCompileType::GenerateAssemblyOnly:
                         stage = Settings::CompilerSet::CompilationStage::CompilationProperOnly;
                         break;
+                    case CppCompileType::GenerateGimpleOnly:
+                        stage = Settings::CompilerSet::CompilationStage::GenerateGimple;
+                        break;
                     case CppCompileType::PreprocessOnly:
                         stage = Settings::CompilerSet::CompilationStage::PreprocessingOnly;
                         break;
@@ -2338,7 +2461,7 @@ void MainWindow::runExecutable(
         }
         mCompilerManager->run(exeName,params,QFileInfo(exeName).absolutePath(),binDirs);
     } else if (runType == RunType::ProblemCases) {
-        POJProblem problem = mOJProblemModel.problem();
+        POJProblem problem = mOJProblemModel->problem();
         if (problem) {
             mCompilerManager->runProblem(exeName,params,QFileInfo(exeName).absolutePath(),
                                          problem->cases,
@@ -2349,8 +2472,8 @@ void MainWindow::runExecutable(
     } else if (runType == RunType::CurrentProblemCase) {
         QModelIndex index = ui->tblProblemCases->currentIndex();
         if (index.isValid()) {
-            POJProblemCase problemCase =mOJProblemModel.getCase(index.row());
-            POJProblem problem = mOJProblemModel.problem();
+            POJProblemCase problemCase =mOJProblemModel->getCase(index.row());
+            POJProblem problem = mOJProblemModel->problem();
             mCompilerManager->runProblem(exeName,params,QFileInfo(exeName).absolutePath(),
                                          problemCase,
                                          problem);
@@ -2553,7 +2676,7 @@ void MainWindow::debug()
             inferior=mProject->options().hostApplication;
             inferiorHasSymbols = false;
         }
-        inferior.replace('\\','/');
+        QDir::fromNativeSeparators(inferior);
         if (!mDebugger->startClient(
                     mProject->options().compilerSet,
                     inferior,
@@ -2650,7 +2773,7 @@ void MainWindow::debug()
                 }
 
                 prepareDebugger();
-                QString newFilePath = debugFile.filePath().replace('\\','/');
+                QString newFilePath =QDir::fromNativeSeparators(debugFile.filePath());
                 if (!mDebugger->startClient(
                             pSettings->compilerSets().defaultIndex(),
                             newFilePath,
@@ -2773,9 +2896,9 @@ void MainWindow::doAutoSave(Editor *e)
             QDateTime time = QDateTime::currentDateTime();
             filename = parent.filePath(
                         QString("%1.%2.%3")
-                        .arg(baseName)
-                        .arg(time.toString("yyyy.MM.dd.hh.mm.ss"))
-                        .arg(suffix));
+                        .arg(baseName,
+                             time.toString("yyyy.MM.dd.hh.mm.ss"),
+                             suffix));
         }
         }
         if (e->isNew()) {
@@ -3308,7 +3431,7 @@ void MainWindow::scanActiveProject(bool parse)
     if (parse) {
         resetCppParser(mProject->cppParser(), mProject->options().compilerSet);
         mProject->resetParserProjectFiles();
-        parseFileList(mProject->cppParser());
+        parseFileListNonBlocking(mProject->cppParser());
     } else {
         mProject->resetParserProjectFiles();
     };
@@ -3360,6 +3483,9 @@ bool MainWindow::saveLastOpens()
       fileObj["caretY"] = editor->caretY();
       fileObj["top"] = editor->topPos();
       fileObj["left"] = editor->leftPos();
+      fileObj["fileType"] =  fileTypeToName(editor->fileType());
+      fileObj["encodingOption"] = QLatin1String(editor->encodingOption());
+      fileObj["contextFile"] = editor->contextFile();
       filesArray.append(fileObj);
     }
     rootObj["files"]=filesArray;
@@ -3376,7 +3502,7 @@ bool MainWindow::saveLastOpens()
                               QMessageBox::Ok);
         return true;
     }
-    if (file.write(doc.toJson())!=json.count()) {
+    if (file.write(doc.toJson())!=json.size()) {
         QMessageBox::critical(this,
                               tr("Save last open info error"),
                               tr("Can't save last open info file '%1'")
@@ -3431,6 +3557,18 @@ void MainWindow::loadLastOpens()
         if (!fileExists(editorFilename))
             continue;
         bool onLeft = fileObj["onLeft"].toBool();
+        QSynedit::BufferCoord pos;
+        pos.ch = fileObj["caretX"].toInt(1);
+        pos.line = fileObj["caretY"].toInt(1);
+        QByteArray encoding;
+        if (fileObj.contains("encodingOption"))
+            encoding = fileObj["encodingOption"].toString().toLatin1();
+        QString contextFile;
+        if (fileObj.contains("contextFile"))
+            contextFile = fileObj["contextFile"].toString();
+        FileType fileType{FileType::None};
+        if (fileObj.contains("fileType"))
+            fileType = nameToFileType(fileObj["fileType"].toString());
         QTabWidget* page;
         if (onLeft)
             page = mEditorList->leftPageWidget();
@@ -3441,12 +3579,14 @@ void MainWindow::loadLastOpens()
             unit = mProject->findUnit(editorFilename);
         }
         bool inProject = (mProject && unit);
-        QByteArray encoding = unit ? unit->encoding() :
-                                     (pSettings->editor().autoDetectFileEncoding()? ENCODING_AUTO_DETECT : pSettings->editor().defaultEncoding());
+        if (encoding.isEmpty()) {
+            encoding = unit ? unit->encoding() :
+                                         (pSettings->editor().autoDetectFileEncoding()? QByteArray(ENCODING_AUTO_DETECT) : pSettings->editor().defaultEncoding());
+        }
         Project* pProject = (inProject?mProject.get():nullptr);
         if (pProject && encoding==ENCODING_PROJECT)
             encoding=pProject->options().encoding;
-        Editor * editor = mEditorList->newEditor(editorFilename, encoding, pProject,false,page);
+        Editor * editor = mEditorList->newEditor(editorFilename, encoding, fileType, contextFile, pProject,false,page);
 
         if (inProject && editor) {
             mProject->loadUnitLayout(editor);
@@ -3456,9 +3596,6 @@ void MainWindow::loadLastOpens()
 //        }
         if (!editor)
             continue;
-        QSynedit::BufferCoord pos;
-        pos.ch = fileObj["caretX"].toInt(1);
-        pos.line = fileObj["caretY"].toInt(1);
         editor->setCaretXY(pos);
         editor->setTopPos(
                     fileObj["top"].toInt(1)
@@ -3545,6 +3682,7 @@ void MainWindow::newEditor(const QString& suffix)
         } while(mEditorList->hasFilename(filename));
         Editor * editor=mEditorList->newEditor(filename,
                                                pSettings->editor().defaultEncoding(),
+                                               FileType::None, QString(),
                                                nullptr,true);
         editor->activate();
         //updateForEncodingInfo();
@@ -3647,7 +3785,7 @@ void MainWindow::buildEncodingMenu()
         QMenu* menuLang = new QMenu();
         menuLang->setTitle(langName);
         menuCharsets->addMenu(menuLang);
-        QList<PCharsetInfo> charInfos = pCharsetInfoManager->findCharsetsByLanguageName(langName);
+        //QList<PCharsetInfo> charInfos = pCharsetInfoManager->findCharsetsByLanguageName(langName);
         connect(menuLang,&QMenu::aboutToShow,
                 [langName,menuLang,this]() {
             menuLang->clear();
@@ -4094,7 +4232,7 @@ void MainWindow::onFilesViewContextMenu(const QPoint &pos)
     menu.addAction(mFilesView_OpenInExplorer);
     menu.addSeparator();
     menu.addAction(ui->actionFilesView_Hide_Non_Support_Files);
-    QString path = mFileSystemModel.filePath(ui->treeFiles->currentIndex());
+    QString path = mFileSystemModel->filePath(ui->treeFiles->currentIndex());
     QFileInfo info(path);
     mFilesView_Open->setEnabled(info.isFile());
     mFilesView_OpenWithExternal->setEnabled(info.isFile());
@@ -4111,10 +4249,10 @@ void MainWindow::onFilesViewContextMenu(const QPoint &pos)
             bool shouldAdd = true;
             foreach (const QModelIndex& index, ui->treeFiles->selectionModel()->selectedRows()) {
                 if (mFileSystemModelIconProvider.VCSRepository()->isFileInRepository(
-                            mFileSystemModel.fileInfo(index)
+                            mFileSystemModel->fileInfo(index)
                             ) &&
                         ! mFileSystemModelIconProvider.VCSRepository()->isFileConflicting(
-                            mFileSystemModel.fileInfo(index)
+                            mFileSystemModel->fileInfo(index)
                             )
                         ) {
                     shouldAdd=false;
@@ -4167,7 +4305,7 @@ void MainWindow::onLstProblemSetContextMenu(const QPoint &pos)
     menu.addAction(mProblem_Rename);
     menu.addAction(mProblem_GotoUrl);
     if (idx.isValid()) {
-        POJProblem problem = mOJProblemSetModel.problem(idx.row());
+        POJProblem problem = mOJProblemSetModel->problem(idx.row());
         QMenu * menuSetAnswer = new QMenu(&menu);
         QActionGroup *actionGroup = new QActionGroup(menuSetAnswer);
         bool answerFound=false;
@@ -4199,7 +4337,7 @@ void MainWindow::onLstProblemSetContextMenu(const QPoint &pos)
                 problem->answerProgram = action->text();
             else
                 problem->answerProgram = "";
-            if (problem == mOJProblemModel.problem()) {
+            if (problem == mOJProblemModel->problem()) {
                 ui->btnOpenProblemAnswer->setEnabled(!problem->answerProgram.isEmpty());
             }
         });
@@ -4215,7 +4353,7 @@ void MainWindow::onLstProblemSetContextMenu(const QPoint &pos)
             if (!filename.isEmpty()) {
                 QDir::setCurrent(extractFileDir(filename));
                 problem->answerProgram = filename;
-                if (problem == mOJProblemModel.problem()) {
+                if (problem == mOJProblemModel->problem()) {
                     ui->btnOpenProblemAnswer->setEnabled(!problem->answerProgram.isEmpty());
                 }
             }
@@ -4244,7 +4382,7 @@ void MainWindow::onTableProblemCasesContextMenu(const QPoint &pos)
     menu.addAction(mProblem_RunAllCases);
     menu.addAction(mProblem_RunCurrentCase);
     menu.addAction(mProblem_CaseValidationOptions);
-    mProblem_RunAllCases->setEnabled(mOJProblemModel.count()>0 && ui->actionRun->isEnabled());
+    mProblem_RunAllCases->setEnabled(mOJProblemModel->count()>0 && ui->actionRun->isEnabled());
     mProblem_RunCurrentCase->setEnabled(idx.isValid() && ui->actionRun->isEnabled());
     menu.exec(ui->tblProblemCases->mapToGlobal(pos));
 }
@@ -4264,7 +4402,7 @@ void MainWindow::onProblemSetIndexChanged(const QModelIndex &current, const QMod
     QModelIndex idx = current;
     if (!idx.isValid()) {
         mProblemSet_RemoveProblem->setEnabled(false);
-        mOJProblemModel.setProblem(nullptr);
+        mOJProblemModel->setProblem(nullptr);
         ui->txtProblemCaseExpected->clearAll();
         ui->txtProblemCaseInput->clearAll();
         ui->txtProblemCaseOutput->clearAll();
@@ -4274,16 +4412,16 @@ void MainWindow::onProblemSetIndexChanged(const QModelIndex &current, const QMod
         ui->tabProblem->setEnabled(false);
     } else {
         mProblemSet_RemoveProblem->setEnabled(true);
-        POJProblem problem = mOJProblemSetModel.problem(idx.row());
+        POJProblem problem = mOJProblemSetModel->problem(idx.row());
         if (mFullInitialized) {
             if (problem && !problem->answerProgram.isEmpty()) {
                 openFile(problem->answerProgram);
             }
         }
-        mOJProblemModel.setProblem(problem);
+        mOJProblemModel->setProblem(problem);
         updateProblemTitle();
-        if (mOJProblemModel.count()>0) {
-            ui->tblProblemCases->setCurrentIndex(mOJProblemModel.index(0,0));
+        if (mOJProblemModel->count()>0) {
+            ui->tblProblemCases->setCurrentIndex(mOJProblemModel->index(0,0));
         } else {
             onProblemCaseIndexChanged(QModelIndex(),QModelIndex());
         }
@@ -4298,12 +4436,18 @@ void MainWindow::onProblemCaseIndexChanged(const QModelIndex &current, const QMo
 {
     QModelIndex idx = current;
     if (previous.isValid()) {
-        POJProblemCase problemCase = mOJProblemModel.getCase(previous.row());
-        problemCase->input = ui->txtProblemCaseInput->toPlainText();
-        problemCase->expected = ui->txtProblemCaseExpected->toPlainText();
+        POJProblemCase problemCase = mOJProblemModel->getCase(previous.row());
+        if (problemCase->inputFileName.isEmpty())
+            problemCase->input = ui->txtProblemCaseInput->toPlainText();
+        else
+            problemCase->input = QString();
+        if (problemCase->expectedOutputFileName.isEmpty())
+            problemCase->expected = ui->txtProblemCaseExpected->toPlainText();
+        else
+            problemCase->expected = QString();
     }
     if (idx.isValid()) {
-        POJProblemCase problemCase = mOJProblemModel.getCase(idx.row());
+        POJProblemCase problemCase = mOJProblemModel->getCase(idx.row());
         if (problemCase) {
             mProblem_RemoveCases->setEnabled(true);
             mProblem_RunAllCases->setEnabled(ui->actionRun->isEnabled());
@@ -4360,7 +4504,7 @@ void MainWindow::onProblemRunCurrentCase()
 void MainWindow::onProblemBatchSetCases()
 {
     showHideMessagesTab(ui->tabProblem,ui->actionProblem);
-    if (mOJProblemModel.count()>0 && QMessageBox::question(this,tr("Batch Set Cases"),
+    if (mOJProblemModel->count()>0 && QMessageBox::question(this,tr("Batch Set Cases"),
                               tr("This operation will remove all cases for the current problem.")
                               +"<br />"
                               +tr("Do you really want to do that?"),
@@ -4368,8 +4512,8 @@ void MainWindow::onProblemBatchSetCases()
                               QMessageBox::No)!=QMessageBox::Yes)
         return;
     QString folder = QDir::currentPath();
-    if (!mOJProblemSetModel.exportFilename().isEmpty())
-        folder = extractFileDir(mOJProblemSetModel.exportFilename());
+    if (!mOJProblemSetModel->exportFilename().isEmpty())
+        folder = extractFileDir(mOJProblemSetModel->exportFilename());
     QStringList files = QFileDialog::getOpenFileNames(
                 this,
                 tr("Choose input files"),
@@ -4377,7 +4521,7 @@ void MainWindow::onProblemBatchSetCases()
                 tr("Input data files (*.in)"));
     if (files.isEmpty())
         return;
-    mOJProblemModel.removeCases();
+    mOJProblemModel->removeCases();
     foreach (const QString& filename, files) {
         POJProblemCase problemCase = std::make_shared<OJProblemCase>();
         problemCase->name = QFileInfo(filename).baseName();
@@ -4392,18 +4536,20 @@ void MainWindow::onProblemBatchSetCases()
             if (fileExists(expectedFileName))
                 problemCase->expectedOutputFileName = expectedFileName;
         }
-        mOJProblemModel.addCase(problemCase);
+        mOJProblemModel->addCase(problemCase);
     }
 }
 
-void MainWindow::onNewProblemReceived(POJProblem newProblem)
+void MainWindow::onNewProblemReceived(int num, int total, POJProblem newProblem)
 {
-    if (mOJProblemSetModel.problemNameUsed(newProblem->name))
+    if (mOJProblemSetModel->problemNameUsed(newProblem->name))
         return;
-    mOJProblemSetModel.addProblem(newProblem);
+    updateStatusbarMessage(tr("Problem '%1' received (%2/%3).")
+                              .arg(newProblem->name).arg(num).arg(total));
+    mOJProblemSetModel->addProblem(newProblem);
     ui->tabExplorer->setCurrentWidget(ui->tabProblemSet);
-    ui->lstProblemSet->setCurrentIndex(mOJProblemSetModel.index(
-                                           mOJProblemSetModel.count()-1
+    ui->lstProblemSet->setCurrentIndex(mOJProblemSetModel->index(
+                                           mOJProblemSetModel->count()-1
                                            ,0));
     if (isMinimized())
         showNormal();
@@ -4413,8 +4559,8 @@ void MainWindow::onNewProblemReceived(POJProblem newProblem)
 
 void MainWindow::updateProblemTitle()
 {
-    ui->lblProblem->setText(mOJProblemModel.getTitle());
-    ui->lblProblem->setToolTip(mOJProblemModel.getTooltip());
+    ui->lblProblem->setText(mOJProblemModel->getTitle());
+    ui->lblProblem->setToolTip(mOJProblemModel->getTooltip());
 }
 
 void MainWindow::onEditorClosed()
@@ -4423,6 +4569,9 @@ void MainWindow::onEditorClosed()
         return;
     updateEditorActions();
     updateAppTitle();
+    if (mEditorList->pageCount()==0) {
+
+    }
 }
 
 void MainWindow::onToolsOutputClear()
@@ -4489,10 +4638,10 @@ void MainWindow::onFilesViewCreateFolderFolderLoaded(const QString& path)
     if (path!=extractFilePath(mFilesViewNewCreatedFolder) && path!=extractFilePath(mFilesViewNewCreatedFile))
         return;
 
-    disconnect(&mFileSystemModel,&QFileSystemModel::directoryLoaded,
+    disconnect(mFileSystemModel,&QFileSystemModel::directoryLoaded,
             this,&MainWindow::onFilesViewCreateFolderFolderLoaded);
 
-    QModelIndex newIndex = mFileSystemModel.index(mFilesViewNewCreatedFolder.isEmpty() ? mFilesViewNewCreatedFile : mFilesViewNewCreatedFolder);
+    QModelIndex newIndex = mFileSystemModel->index(mFilesViewNewCreatedFolder.isEmpty() ? mFilesViewNewCreatedFile : mFilesViewNewCreatedFolder);
 
     if (newIndex.isValid()) {
         ui->treeFiles->setCurrentIndex(newIndex);
@@ -4508,17 +4657,17 @@ void MainWindow::onFilesViewCreateFolder()
     QDir dir;
     if (index.isValid()
             && ui->treeFiles->selectionModel()->isSelected(index)) {
-        if (mFileSystemModel.isDir(index)) {
-            dir = QDir(mFileSystemModel.fileInfo(index).absoluteFilePath());
+        if (mFileSystemModel->isDir(index)) {
+            dir = QDir(mFileSystemModel->fileInfo(index).absoluteFilePath());
             parentIndex = index;
         } else {
-            dir = mFileSystemModel.fileInfo(index).absoluteDir();
-            parentIndex = mFileSystemModel.index(dir.absolutePath());
+            dir = mFileSystemModel->fileInfo(index).absoluteDir();
+            parentIndex = mFileSystemModel->index(dir.absolutePath());
         }
         //ui->treeFiles->expand(index);
     } else {
-        dir = mFileSystemModel.rootDirectory();
-        parentIndex=mFileSystemModel.index(dir.absolutePath());
+        dir = mFileSystemModel->rootDirectory();
+        parentIndex=mFileSystemModel->index(dir.absolutePath());
     }
     QString folderName = tr("New Folder");
     int count = 0;
@@ -4526,16 +4675,16 @@ void MainWindow::onFilesViewCreateFolder()
         count++;
         folderName = tr("New Folder %1").arg(count);
     }
-    QModelIndex newIndex = mFileSystemModel.mkdir(parentIndex,folderName);
+    QModelIndex newIndex = mFileSystemModel->mkdir(parentIndex,folderName);
     if (newIndex.isValid()) {
         if (ui->treeFiles->isExpanded(parentIndex)) {
             ui->treeFiles->setCurrentIndex(newIndex);
             ui->treeFiles->edit(newIndex);
         } else {
-            connect(&mFileSystemModel,&QFileSystemModel::directoryLoaded,
+            connect(mFileSystemModel,&QFileSystemModel::directoryLoaded,
                     this,&MainWindow::onFilesViewCreateFolderFolderLoaded);
             ui->treeFiles->expand(parentIndex);
-            mFilesViewNewCreatedFolder=mFileSystemModel.filePath(newIndex);
+            mFilesViewNewCreatedFolder=mFileSystemModel->filePath(newIndex);
         }
 
     }
@@ -4547,12 +4696,12 @@ void MainWindow::onFilesViewCreateFile()
     QDir dir;
     if (index.isValid()
             && ui->treeFiles->selectionModel()->isSelected(index)) {
-        if (mFileSystemModel.isDir(index))
-            dir = QDir(mFileSystemModel.fileInfo(index).absoluteFilePath());
+        if (mFileSystemModel->isDir(index))
+            dir = QDir(mFileSystemModel->fileInfo(index).absoluteFilePath());
         else
-            dir = mFileSystemModel.fileInfo(index).absoluteDir();
+            dir = mFileSystemModel->fileInfo(index).absoluteDir();
     } else {
-        dir = mFileSystemModel.rootDirectory();
+        dir = mFileSystemModel->rootDirectory();
     }
     QString suffix;
     if (pSettings->editor().defaultFileCpp())
@@ -4568,11 +4717,11 @@ void MainWindow::onFilesViewCreateFile()
     QFile file(dir.filePath(fileName));
     file.open(QFile::NewOnly);
     file.close();
-    QModelIndex newIndex = mFileSystemModel.index(dir.filePath(fileName));
-    connect(&mFileSystemModel,&QFileSystemModel::directoryLoaded,
+    QModelIndex newIndex = mFileSystemModel->index(dir.filePath(fileName));
+    connect(mFileSystemModel,&QFileSystemModel::directoryLoaded,
             this,&MainWindow::onFilesViewCreateFolderFolderLoaded);
     ui->treeFiles->expand(index);
-    mFilesViewNewCreatedFile=mFileSystemModel.filePath(newIndex);
+    mFilesViewNewCreatedFile=mFileSystemModel->filePath(newIndex);
 }
 
 
@@ -4582,14 +4731,14 @@ void MainWindow::onFilesViewRemoveFiles()
     if (indexList.isEmpty()) {
         QModelIndex index = ui->treeFiles->currentIndex();
         if (QMessageBox::question(ui->treeFiles,tr("Delete")
-                                  ,tr("Do you really want to delete %1?").arg(mFileSystemModel.fileName(index)),
+                                  ,tr("Do you really want to delete %1?").arg(mFileSystemModel->fileName(index)),
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No)!=QMessageBox::Yes)
             return;
         doFilesViewRemoveFile(index);
     } else if (indexList.count()==1) {
         QModelIndex index = indexList[0];
         if (QMessageBox::question(ui->treeFiles,tr("Delete")
-                                  ,tr("Do you really want to delete %1?").arg(mFileSystemModel.fileName(index)),
+                                  ,tr("Do you really want to delete %1?").arg(mFileSystemModel->fileName(index)),
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No)!=QMessageBox::Yes)
             return;
         doFilesViewRemoveFile(index);
@@ -4617,7 +4766,7 @@ void MainWindow::onProblemProperties()
     QModelIndex idx = ui->lstProblemSet->currentIndex();
     if (!idx.isValid())
         return;
-    POJProblem problem=mOJProblemSetModel.problem(idx.row());
+    POJProblem problem=mOJProblemSetModel->problem(idx.row());
     if (!problem)
         return;
     OJProblemPropertyWidget dialog;
@@ -4632,7 +4781,7 @@ void MainWindow::onProblemOpenSource()
     QModelIndex idx = ui->lstProblemSet->currentIndex();
     if (!idx.isValid())
         return;
-    POJProblem problem=mOJProblemSetModel.problem(idx.row());
+    POJProblem problem=mOJProblemSetModel->problem(idx.row());
     if (!problem)
         return;
     if (!problem->answerProgram.isEmpty()) {
@@ -4653,7 +4802,7 @@ void MainWindow::onProblemGotoUrl()
     QModelIndex idx = ui->lstProblemSet->currentIndex();
     if (!idx.isValid())
         return;
-    POJProblem problem=mOJProblemSetModel.problem(idx.row());
+    POJProblem problem=mOJProblemSetModel->problem(idx.row());
     if (!problem)
         return;
     if (!problem->url.isEmpty()) {
@@ -4671,8 +4820,8 @@ void MainWindow::onRenameProblemSet()
                 ui->lblProblemSet->text());
     newName = newName.trimmed();
     if (!newName.isEmpty()){
-        mOJProblemSetModel.rename(newName);
-        ui->lblProblemSet->setText(mOJProblemSetModel.name());
+        mOJProblemSetModel->rename(newName);
+        ui->lblProblemSet->setText(mOJProblemSetModel->name());
     }
 }
 
@@ -4754,7 +4903,7 @@ void MainWindow::onBreakpointTableDoubleClicked(const QModelIndex &index)
 
 void MainWindow::onFilesViewOpenInExplorer()
 {
-    QString path = mFileSystemModel.filePath(ui->treeFiles->currentIndex());
+    QString path = mFileSystemModel->filePath(ui->treeFiles->currentIndex());
     if (!path.isEmpty()) {
         openFileFolderInExplorer(path);
     }
@@ -4762,7 +4911,7 @@ void MainWindow::onFilesViewOpenInExplorer()
 
 void MainWindow::onFilesViewOpenInTerminal()
 {
-    QString path = mFileSystemModel.filePath(ui->treeFiles->currentIndex());
+    QString path = mFileSystemModel->filePath(ui->treeFiles->currentIndex());
     if (!path.isEmpty()) {
         QFileInfo fileInfo(path);
 #ifdef Q_OS_WIN
@@ -4775,7 +4924,7 @@ void MainWindow::onFilesViewOpenInTerminal()
 
 void MainWindow::onFilesViewOpenWithExternal()
 {
-    QString path = mFileSystemModel.filePath(ui->treeFiles->currentIndex());
+    QString path = mFileSystemModel->filePath(ui->treeFiles->currentIndex());
     if (!path.isEmpty() && QFileInfo(path).isFile()) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     }
@@ -4783,7 +4932,7 @@ void MainWindow::onFilesViewOpenWithExternal()
 
 void MainWindow::onFilesViewOpen()
 {
-    QString path = mFileSystemModel.filePath(ui->treeFiles->currentIndex());
+    QString path = mFileSystemModel->filePath(ui->treeFiles->currentIndex());
     if (!path.isEmpty() && QFileInfo(path).isFile()) {
         if (getFileType(path)==FileType::Project) {
             openProject(path);
@@ -4841,21 +4990,21 @@ void MainWindow::onClassBrowserShowInherited()
 {
     pSettings->ui().setClassBrowserShowInherited(mClassBrowser_Show_Inherited->isChecked());
     pSettings->ui().save();
-    mClassBrowserModel.fillStatements();
+    mClassBrowserModel->fillStatements();
 }
 
 void MainWindow::onClassBrowserSortByType()
 {
     pSettings->ui().setClassBrowserSortType(mClassBrowser_Sort_By_Type->isChecked());
     pSettings->ui().save();
-    mClassBrowserModel.fillStatements();
+    mClassBrowserModel->fillStatements();
 }
 
 void MainWindow::onClassBrowserSortByName()
 {
     pSettings->ui().setClassBrowserSortAlpha(mClassBrowser_Sort_By_Name->isChecked());
     pSettings->ui().save();
-    mClassBrowserModel.fillStatements();
+    mClassBrowserModel->fillStatements();
 }
 
 void MainWindow::onClassBrowserChangeScope()
@@ -4872,8 +5021,8 @@ void MainWindow::onClassBrowserChangeScope()
     mProject->saveOptions();
     Editor* editor = mEditorList->getEditor();
     if ((!editor || editor->inProject())  &&
-            mClassBrowserModel.classBrowserType()!=classBrowserType) {
-        mClassBrowserModel.setClassBrowserType(classBrowserType);
+            mClassBrowserModel->classBrowserType()!=classBrowserType) {
+        mClassBrowserModel->setClassBrowserType(classBrowserType);
     }
 }
 
@@ -4891,14 +5040,13 @@ void MainWindow::onClassBrowserRefreshStart()
         return;
     }
     mClassBrowserCurrentStatement=QString("%1+%2+%3")
-            .arg(statement->fullName)
-            .arg(statement->noNameArgs)
+            .arg(statement->fullName, statement->noNameArgs)
             .arg((int)statement->kind);
 }
 
 void MainWindow::onClassBrowserRefreshEnd()
 {
-    QModelIndex index = mClassBrowserModel.modelIndexForStatement(mClassBrowserCurrentStatement);
+    QModelIndex index = mClassBrowserModel->modelIndexForStatement(mClassBrowserCurrentStatement);
     if (index.isValid()) {
         ui->classBrowser->expand(index);
         ui->classBrowser->setCurrentIndex(index);
@@ -5025,14 +5173,14 @@ void MainWindow::onModifyBreakpointCondition()
 
 void MainWindow::onSearchViewClearAll()
 {
-    mSearchResultModel.clear();
+    mSearchResultModel->clear();
 }
 
 void MainWindow::onSearchViewClear()
 {
     int index = ui->cbSearchHistory->currentIndex();
     if (index>=0) {
-        mSearchResultModel.removeSearchResults(index);
+        mSearchResultModel->removeSearchResults(index);
     }
 }
 
@@ -5067,12 +5215,7 @@ void MainWindow::onEditorContextMenu(const QPoint& pos)
     if (!editor)
         return;
     FileType fileType=getFileType(editor->filename());
-    bool canDebug = (fileType==FileType::CSource
-            || fileType==FileType::CHeader
-            || fileType==FileType::CppSource
-            || fileType==FileType::CppHeader
-            || fileType==FileType::GAS
-            );
+    bool canDebug = isC_CPP_ASMSourceFile(fileType);
     QMenu menu(this);
     QSynedit::BufferCoord p;
     int line;
@@ -5264,17 +5407,17 @@ void MainWindow::stopDebugForNoSymbolTable()
 
 void MainWindow::onTodoParsingFile(const QString& filename)
 {
-    mTodoModel.removeTodosForFile(filename);
+    mTodoModel->removeTodosForFile(filename);
 }
 
 void MainWindow::onTodoParseStarted()
 {
-    mTodoModel.clear();
+    mTodoModel->clear();
 }
 
 void MainWindow::onTodoFound(const QString& filename, int lineNo, int ch, const QString& line)
 {
-    mTodoModel.addItem(filename,lineNo,ch,line);
+    mTodoModel->addItem(filename,lineNo,ch,line);
 }
 
 void MainWindow::onTodoParseFinished()
@@ -5373,7 +5516,7 @@ void MainWindow::closeProject(bool refreshEditor)
                         mProject->directory());
         }
 
-        mClassBrowserModel.beginUpdate();
+        mClassBrowserModel->beginUpdate();
         // Remember it
         mVisitHistoryManager->addProject(mProject->filename());
 
@@ -5386,19 +5529,19 @@ void MainWindow::closeProject(bool refreshEditor)
             Editor * e = mEditorList->getEditor();
             updateClassBrowserForEditor(e);
         } else {
-            mClassBrowserModel.setParser(nullptr);
-            mClassBrowserModel.setCurrentFile("");
+            mClassBrowserModel->setParser(nullptr);
+            mClassBrowserModel->setCurrentFile("");
         }
         mEditorList->endUpdate();
-        mClassBrowserModel.endUpdate();
+        mClassBrowserModel->endUpdate();
 
         if (!mQuitting) {
             mBookmarkModel->clear(true);
             mBookmarkModel->setIsForProject(false);
             mDebugger->clearForProject();
             mDebugger->setIsForProject(false);
-            mTodoModel.clear(true);
-            mTodoModel.setIsForProject(false);
+            mTodoModel->clear(true);
+            mTodoModel->setIsForProject(false);
             // Clear error browser
             clearIssues();
         }
@@ -5505,17 +5648,17 @@ void MainWindow::onFilesViewPathChanged()
     ui->cbFilesPath->blockSignals(false);
 }
 
-const std::shared_ptr<HeaderCompletionPopup> &MainWindow::headerCompletionPopup() const
+HeaderCompletionPopup *MainWindow::headerCompletionPopup() const
 {
     return mHeaderCompletionPopup;
 }
 
-const std::shared_ptr<FunctionTooltipWidget> &MainWindow::functionTip() const
+FunctionTooltipWidget *MainWindow::functionTip() const
 {
     return mFunctionTip;
 }
 
-const std::shared_ptr<CodeCompletionPopup> &MainWindow::completionPopup() const
+CodeCompletionPopup *MainWindow::completionPopup() const
 {
     return mCompletionPopup;
 }
@@ -5527,7 +5670,7 @@ SearchInFileDialog *MainWindow::searchInFilesDialog() const
 
 SearchResultModel *MainWindow::searchResultModel()
 {
-    return &mSearchResultModel;
+    return mSearchResultModel;
 }
 
 EditorList *MainWindow::editorList() const
@@ -5537,7 +5680,7 @@ EditorList *MainWindow::editorList() const
 
 Debugger *MainWindow::debugger() const
 {
-    return mDebugger.get();
+    return mDebugger;
 }
 
 CPUDialog *MainWindow::cpuDialog() const
@@ -5669,7 +5812,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
             int currentIndex=-1;
             if (ui->lstProblemSet->currentIndex().isValid())
                 currentIndex = ui->lstProblemSet->currentIndex().row();
-            mOJProblemSetModel.save(currentIndex);
+            mOJProblemSetModel->save(currentIndex);
         } catch (FileError& e) {
             QMessageBox::warning(nullptr,
                              tr("Save Error"),
@@ -5723,12 +5866,16 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     mCCHandler.stop();
     mCompilerManager->stopAllRunners();
     mCompilerManager->stopCompile();
+    mCompilerManager->stopCheckSyntax();
     mCompilerManager->stopRun();
+    mDebugger->stop();
+
     if (!mShouldRemoveAllSettings)
         mSymbolUsageManager->save();
 
     if (mCPUDialog!=nullptr)
         cleanUpCPUDialog();
+
     event->accept();
     return;
 }
@@ -5737,12 +5884,14 @@ void MainWindow::showEvent(QShowEvent *)
 {
     if (mFullInitialized)
         return;
+    //lazy initialize
     mFullInitialized = true;
     applySettings();
     const Settings::UI& settings = pSettings->ui();
     ui->tabMessages->setCurrentIndex(settings.bottomPanelIndex());
     ui->tabExplorer->setCurrentIndex(settings.leftPanelIndex());
     ui->debugViews->setCurrentIndex(settings.debugPanelIndex());
+    validateCompilerSet(pSettings->compilerSets().defaultIndex());
 }
 
 void MainWindow::hideEvent(QHideEvent *)
@@ -5847,6 +5996,7 @@ void MainWindow::onCompilerSetChanged(int index)
     pSettings->compilerSets().saveDefaultIndex();
 
     reparseNonProjectEditors();
+    validateCompilerSet(index);
 }
 
 void MainWindow::logToolsOutput(const QString& msg)
@@ -5887,7 +6037,7 @@ void MainWindow::clearToolsOutput()
 
 void MainWindow::clearTodos()
 {
-    mTodoModel.clear();
+    mTodoModel->clear();
 }
 
 void MainWindow::onCompileStarted()
@@ -6122,14 +6272,14 @@ void MainWindow::onOJProblemCaseStarted(const QString& id,int current, int total
     ui->pbProblemCases->setVisible(true);
     ui->pbProblemCases->setMaximum(total);
     ui->pbProblemCases->setValue(current);
-    int row = mOJProblemModel.getCaseIndexById(id);
+    int row = mOJProblemModel->getCaseIndexById(id);
     if (row>=0) {
-        POJProblemCase problemCase = mOJProblemModel.getCase(row);
+        POJProblemCase problemCase = mOJProblemModel->getCase(row);
         problemCase->testState = ProblemCaseTestState::Testing;
-        mOJProblemModel.update(row);
+        mOJProblemModel->update(row);
         QModelIndex idx = ui->tblProblemCases->currentIndex();
         if (!idx.isValid() || row != idx.row()) {
-            ui->tblProblemCases->setCurrentIndex(mOJProblemModel.index(row,0));
+            ui->tblProblemCases->setCurrentIndex(mOJProblemModel->index(row,0));
         }
         ui->txtProblemCaseOutput->clearAll();
         if (ui->txtProblemCaseExpected->document()->blockCount()<=5000) {
@@ -6140,14 +6290,14 @@ void MainWindow::onOJProblemCaseStarted(const QString& id,int current, int total
 
 void MainWindow::onOJProblemCaseFinished(const QString& id, int current, int total)
 {
-    int row = mOJProblemModel.getCaseIndexById(id);
+    int row = mOJProblemModel->getCaseIndexById(id);
     if (row>=0) {
-        POJProblemCase problemCase = mOJProblemModel.getCase(row);
+        POJProblemCase problemCase = mOJProblemModel->getCase(row);
         ProblemCaseValidator validator;
         problemCase->testState = validator.validate(problemCase,pSettings->executor().problemCaseValidateType())?
                     ProblemCaseTestState::Passed:
                     ProblemCaseTestState::Failed;
-        mOJProblemModel.update(row);
+        mOJProblemModel->update(row);
         updateProblemCaseOutput(problemCase);
     }
     ui->pbProblemCases->setMaximum(total);
@@ -6340,7 +6490,7 @@ void MainWindow::on_actionConvert_to_ANSI_triggered()
         return;
     if (QMessageBox::warning(this,tr("Confirm Convertion"),
                    tr("The editing file will be saved using %1 encoding. <br />This operation can't be reverted. <br />Are you sure to continue?")
-                   .arg(QString(QTextCodec::codecForLocale()->name())),
+                   .arg(QString(TextEncoder::encoderForSystem().name())),
                    QMessageBox::Yes, QMessageBox::No)!=QMessageBox::Yes)
         return;
     editor->convertToEncoding(ENCODING_SYSTEM_DEFAULT);
@@ -6505,7 +6655,7 @@ void MainWindow::onDebugEvaluateInput()
 {
     QString s=ui->cbEvaluate->currentText().trimmed();
     if (!s.isEmpty()) {
-        connect(mDebugger.get(), &Debugger::evalValueReady,
+        connect(mDebugger, &Debugger::evalValueReady,
                    this, &MainWindow::onEvalValueReady);
         mDebugger->evalExpression(s);
         pMainWindow->debugger()->refreshAll();
@@ -6572,7 +6722,7 @@ void MainWindow::onEndParsing(int total, int)
 void MainWindow::onEvalValueReady(const QString& value)
 {
     updateDebugEval(value);
-    disconnect(mDebugger.get(), &Debugger::evalValueReady,
+    disconnect(mDebugger, &Debugger::evalValueReady,
                this, &MainWindow::onEvalValueReady);
 }
 
@@ -6590,7 +6740,8 @@ void MainWindow::on_actionFind_triggered()
     Editor *e = mEditorList->getEditor();
     if (!e)
         return;
-    hideAllSearchDialogs();
+    if (mSearchInFilesDialog)
+        mSearchInFilesDialog->hide();
     prepareSearchDialog();
     if (e->selAvail())
         mSearchDialog->find(e->selText());
@@ -6600,7 +6751,8 @@ void MainWindow::on_actionFind_triggered()
 
 void MainWindow::on_actionFind_in_files_triggered()
 {
-    hideAllSearchDialogs();
+    if (mSearchDialog)
+        mSearchDialog->hide();
     prepareSearchInFilesDialog();
     Editor *e = mEditorList->getEditor();
     if (e) {
@@ -6619,7 +6771,8 @@ void MainWindow::on_actionReplace_triggered()
     if (!e)
         return;
 
-    hideAllSearchDialogs();
+    if (mSearchInFilesDialog)
+        mSearchInFilesDialog->hide();
     prepareSearchDialog();
     if (e->selAvail())
         mSearchDialog->replace(e->selText());
@@ -6653,8 +6806,8 @@ void MainWindow::on_actionFind_Previous_triggered()
 
 void MainWindow::on_cbSearchHistory_currentIndexChanged(int index)
 {
-    mSearchResultModel.setCurrentIndex(index);
-    PSearchResults results = mSearchResultModel.results(index);
+    mSearchResultModel->setCurrentIndex(index);
+    PSearchResults results = mSearchResultModel->results(index);
     if (results) {
         if (results->searchType==SearchType::Search
                 && results->scope==SearchFileScope::wholeProject
@@ -6670,7 +6823,7 @@ void MainWindow::on_cbSearchHistory_currentIndexChanged(int index)
 void MainWindow::on_btnSearchAgain_clicked()
 {
     hideAllSearchDialogs();
-    PSearchResults results=mSearchResultModel.currentResults();
+    PSearchResults results=mSearchResultModel->currentResults();
     if (!results)
         return;
     if (results->searchType == SearchType::Search){
@@ -7031,8 +7184,8 @@ void MainWindow::on_actionProject_options_triggered()
     if (!mProject)
         return;
 //    int oldCompilerSet = mProject->options().compilerSet;
-    QString oldName = mProject->name();
-    PSettingsDialog dialog = SettingsDialog::projectOptionDialog();
+    //QString oldName = mProject->name();
+    PSettingsDialog dialog = SettingsDialog::projectOptionDialog(this);
     dialog->exec();
     updateCompilerSet();
 //    if (oldCompilerSet != mProject->options().compilerSet)
@@ -7220,7 +7373,7 @@ void MainWindow::on_actionAdd_to_project_triggered()
         }
         mProject->saveAll();
         updateProjectView();
-        parseFileList(mProject->cppParser());
+        parseFileListNonBlocking(mProject->cppParser());
     }
 }
 
@@ -7251,8 +7404,8 @@ void MainWindow::on_actionRemove_from_project_triggered()
     for(PProjectUnit& unit: units) {
         mProject->removeUnit(unit, true, removeFile);
     }
-    mClassBrowserModel.beginUpdate();
-    mClassBrowserModel.endUpdate();
+    mClassBrowserModel->beginUpdate();
+    mClassBrowserModel->endUpdate();
     ui->projectView->selectionModel()->clearSelection();
     mProject->saveAll();
     updateProjectView();
@@ -7353,12 +7506,12 @@ const PTodoParser &MainWindow::todoParser() const
     return mTodoParser;
 }
 
-PCodeSnippetManager &MainWindow::codeSnippetManager()
+CodeSnippetsManager *MainWindow::codeSnippetManager() const
 {
     return mCodeSnippetManager;
 }
 
-PSymbolUsageManager &MainWindow::symbolUsageManager()
+SymbolUsageManager *MainWindow::symbolUsageManager() const
 {
     return mSymbolUsageManager;
 }
@@ -7573,12 +7726,12 @@ void MainWindow::newProjectUnitFile(const QString& suffix)
 
     mProject->saveAll();
 
-    parseFileList(mProject->cppParser());
+    parseFileListNonBlocking(mProject->cppParser());
     Editor * editor = mProject->openUnit(newUnit, false);
     if (editor)
         editor->activate();
-    QString branch;
 #ifdef ENABLE_VCS
+    QString branch;
     if (pSettings->vcs().gitOk() && mProject->model()->iconProvider()->VCSRepository()->hasRepository(branch)) {
         QString output;
         mProject->model()->iconProvider()->VCSRepository()->add(newFileName,output);
@@ -7591,9 +7744,19 @@ void MainWindow::newProjectUnitFile(const QString& suffix)
 void MainWindow::fillProblemCaseInputAndExpected(const POJProblemCase &problemCase)
 {
     ui->btnProblemCaseInputFileName->setEnabled(true);
-    if (fileExists(problemCase->inputFileName)) {
+    if (!problemCase->inputFileName.isEmpty()) {
         ui->txtProblemCaseInput->setReadOnly(true);
-        ui->txtProblemCaseInput->setPlainText(readFileToByteArray(problemCase->inputFileName));
+        if (fileExists(problemCase->inputFileName)) {
+            QFileInfo inputFileInfo{problemCase->inputFileName};
+            if (pSettings->executor().maxCaseInputFileSize() > 0
+                    && inputFileInfo.size() > pSettings->executor().maxCaseInputFileSize()*1024*1024) {
+                ui->txtProblemCaseInput->setPlainText(tr("Input Data File is too large to display!"));
+            } else {
+                ui->txtProblemCaseInput->setPlainText(readFileToByteArray(problemCase->inputFileName));
+            }
+        } else {
+            ui->txtProblemCaseInput->setPlainText(tr("File doesn't exist!"));
+        }
         ui->btnProblemCaseClearInputFileName->setVisible(true);
         ui->txtProblemCaseInputFileName->setText(extractFileName(problemCase->inputFileName));
         ui->txtProblemCaseInputFileName->setToolTip(problemCase->inputFileName);
@@ -7605,10 +7768,14 @@ void MainWindow::fillProblemCaseInputAndExpected(const POJProblemCase &problemCa
         ui->txtProblemCaseInputFileName->setToolTip("");
     }
     ui->btnProblemCaseExpectedOutputFileName->setEnabled(true);
-    if (fileExists(problemCase->expectedOutputFileName)) {
+    if (!problemCase->expectedOutputFileName.isEmpty()) {
         ui->txtProblemCaseExpected->setReadOnly(true);
         ui->txtProblemCaseExpected->clearAll();
-        ui->txtProblemCaseExpected->setPlainText(readFileToByteArray(problemCase->expectedOutputFileName));
+        if (fileExists(problemCase->expectedOutputFileName)) {
+            ui->txtProblemCaseExpected->setPlainText(readFileToByteArray(problemCase->expectedOutputFileName));
+        } else {
+            ui->txtProblemCaseInput->setPlainText(tr("File doesn't exist!"));
+        }
         ui->btnProblemCaseClearExpectedOutputFileName->setVisible(true);
         ui->txtProblemCaseExpectedOutputFileName->setText(extractFileName(problemCase->expectedOutputFileName));
         ui->txtProblemCaseExpectedOutputFileName->setToolTip(problemCase->inputFileName);
@@ -7626,20 +7793,20 @@ void MainWindow::doFilesViewRemoveFile(const QModelIndex &index)
 {
     if (!index.isValid())
         return;
-    if (mFileSystemModel.isDir(index)) {
-        QDir dir(mFileSystemModel.fileInfo(index).absoluteFilePath());
+    if (mFileSystemModel->isDir(index)) {
+        QDir dir(mFileSystemModel->fileInfo(index).absoluteFilePath());
         if (!dir.isEmpty() &&
                 QMessageBox::question(ui->treeFiles
                                       ,tr("Delete")
-                                      ,tr("Folder %1 is not empty.").arg(mFileSystemModel.fileName(index))
+                                      ,tr("Folder %1 is not empty.").arg(mFileSystemModel->fileName(index))
                                       + tr("Do you really want to delete it?"),
                             QMessageBox::Yes | QMessageBox::No, QMessageBox::No)!=QMessageBox::Yes)
             return;
         if (!QFile::moveToTrash(dir.absolutePath()))
             dir.removeRecursively();
     } else {
-        if (!QFile::moveToTrash(mFileSystemModel.filePath(index)))
-            QFile::remove(mFileSystemModel.filePath(index));
+        if (!QFile::moveToTrash(mFileSystemModel->filePath(index)))
+            QFile::remove(mFileSystemModel->filePath(index));
     }
 }
 
@@ -7690,8 +7857,7 @@ void MainWindow::reparseNonProjectEditors()
 QString MainWindow::switchHeaderSourceTarget(Editor *editor)
 {
     QString filename=editor->filename();
-    if (getFileType(filename)==FileType::CHeader
-            || getFileType(filename)==FileType::CppHeader) {
+    if (isC_CPPHeaderFile(getFileType(filename))) {
         QStringList lst;
         lst.push_back("c");
         lst.push_back("cc");
@@ -7800,7 +7966,7 @@ void MainWindow::backupMenuForEditor(QMenu *menu, QList<QAction *> &backup)
         if (!action->objectName().isEmpty())
             changeEditorActionParent(action, menu->title());
         if (action->isSeparator()) {
-            action = new QAction();
+            action = new QAction(this);
             action->setSeparator(true);
         }
         backup.append(action);
@@ -7820,6 +7986,23 @@ void MainWindow::backupMenuForEditor(QMenu *menu, QList<QAction *> &backup)
             [menu] {
         menu->clear();
     });
+}
+
+void MainWindow::validateCompilerSet(int index)
+{
+    Settings::PCompilerSet set = pSettings->compilerSets().getSet(index);
+    if (set) {
+        QStringList errors = set->findErrors();
+        if (!errors.isEmpty()) {
+            mCompilerSet->setItemIcon(index, pIconsManager->getIcon(IconsManager::ACTION_MISC_CROSS));
+            QMessageBox::warning(this,
+                                 tr("Error in Compiler Set"),
+                                 tr("Current Compiler set has the following critical error: \n\n")
+                                 +errors.join("\n"));
+        } else {
+            mCompilerSet->setItemIcon(index, QIcon());
+        }
+    }
 }
 
 void MainWindow::setupSlotsForProject()
@@ -7845,7 +8028,7 @@ void MainWindow::onProjectUnitRemoved(const QString &filename)
     mProject->cppParser()->invalidateFile(filename);
     mProject->cppParser()->removeProjectFile(filename);
     if (pSettings->editor().parseTodos()) {
-        mTodoModel.removeTodosForFile(filename);
+        mTodoModel->removeTodosForFile(filename);
     }
     mDebugger->breakpointModel()->removeBreakpointsInFile(filename,true);
     mBookmarkModel->removeBookmarks(filename,true);
@@ -7856,9 +8039,9 @@ void MainWindow::onProjectUnitRenamed(const QString &oldFilename, const QString 
     mProject->cppParser()->invalidateFile(oldFilename);
     mProject->cppParser()->removeProjectFile(oldFilename);
     mProject->cppParser()->addProjectFile(newFilename,true);
-    parseFileList(mProject->cppParser());
+    parseFileListNonBlocking(mProject->cppParser());
     if (pSettings->editor().parseTodos()) {
-        mTodoModel.removeTodosForFile(oldFilename);
+        mTodoModel->removeTodosForFile(oldFilename);
         mTodoParser->parseFile(newFilename,true);
     }
     mBookmarkModel->renameBookmarkFile(oldFilename,newFilename,true);
@@ -8051,7 +8234,7 @@ void MainWindow::invalidateProjectProxyModel()
 void MainWindow::onEditorRenamed(const QString &oldFilename, const QString &newFilename, bool firstSave)
 {
     if (firstSave)
-        mOJProblemSetModel.updateProblemAnswerFilename(oldFilename, newFilename);
+        mOJProblemSetModel->updateProblemAnswerFilename(oldFilename, newFilename);
     Editor * editor=mEditorList->getOpenedEditorByFilename(newFilename);
     if (editor && !editor->inProject()) {
         mBookmarkModel->renameBookmarkFile(oldFilename,newFilename,false);
@@ -8070,7 +8253,7 @@ void MainWindow::on_EditorTabsRight_currentChanged(int)
 
 void MainWindow::on_tableTODO_doubleClicked(const QModelIndex &index)
 {
-    PTodoItem item = mTodoModel.getItem(index);
+    PTodoItem item = mTodoModel->getItem(index);
     if (item) {
         Editor * editor = mEditorList->getOpenedEditorByFilename(item->filename);
         if (editor) {
@@ -8096,12 +8279,12 @@ void MainWindow::on_actionRename_Symbol_triggered()
         return;
     editor->beginEditing();
     QSynedit::BufferCoord oldCaretXY = editor->caretXY();
-    //    mClassBrowserModel.beginUpdate();
+    //    mClassBrowserModel->beginUpdate();
     QCursor oldCursor = editor->cursor();
     editor->setCursor(Qt::CursorShape::WaitCursor);
     auto action = finally([oldCursor,editor]{
         editor->endEditing();
-//        mClassBrowserModel.EndTreeUpdate;
+//        mClassBrowserModel->EndTreeUpdate;
         editor->setCursor(oldCursor);
     });
 
@@ -8116,7 +8299,8 @@ void MainWindow::on_actionRename_Symbol_triggered()
         for (int i=0;i<mEditorList->pageCount();i++) {
             Editor * e=(*mEditorList)[i];
             if (e->modified())  {
-                mProject->cppParser()->parseFile(editor->filename(), editor->inProject(), false, false);
+                //here we must reparse the file in sync, or rename may fail
+                parseFileBlocking(mProject->cppParser(), editor->filename(), editor->inProject(), editor->contextFile(), false, false);
             }
         }
 
@@ -8171,9 +8355,8 @@ void MainWindow::on_actionRename_Symbol_triggered()
         return;
 
     if (!editor->inProject() && editor->modified() ) {
-        PCppParser parser = editor->parser();
         //here we must reparse the file in sync, or rename may fail
-        parser->parseFile(editor->filename(), editor->inProject(), false, false);
+        parseFileBlocking(editor->parser(), editor->filename(), editor->inProject(), editor->contextFile(), false, false);
     }
     CppRefacter refactor;
 
@@ -8188,9 +8371,9 @@ void MainWindow::showSearchReplacePanel(bool show)
 {
     ui->replacePanel->setVisible(show);
     ui->cbSearchHistory->setDisabled(show);
-    if (show && mSearchResultModel.currentResults()) {
+    if (show && mSearchResultModel->currentResults()) {
         ui->cbReplaceInHistory->setCurrentText(
-                    mSearchResultModel.currentResults()->keyword);
+                    mSearchResultModel->currentResults()->keyword);
     }
     mSearchResultTreeModel->setSelectable(show);
 }
@@ -8198,18 +8381,18 @@ void MainWindow::showSearchReplacePanel(bool show)
 void MainWindow::setFilesViewRoot(const QString &path, bool setOpenFolder)
 {
     mFileSystemModelIconProvider.setRootFolder(path);
-    mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
-    mFileSystemModel.setRootPath(path);
-    ui->treeFiles->setRootIndex(mFileSystemModel.index(path));
+    mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
+    mFileSystemModel->setRootPath(path);
+    ui->treeFiles->setRootIndex(mFileSystemModel->index(path));
     pSettings->environment().setCurrentFolder(path);
     if (setOpenFolder)
         QDir::setCurrent(path);
     int pos = ui->cbFilesPath->findText(path);
     if (pos<0) {
-        ui->cbFilesPath->addItem(mFileSystemModel.iconProvider()->icon(QFileIconProvider::Folder),path);
+        ui->cbFilesPath->addItem(mFileSystemModel->iconProvider()->icon(QFileIconProvider::Folder),path);
         pos =  ui->cbFilesPath->findText(path);
     } else if (ui->cbFilesPath->itemIcon(pos).isNull()) {
-        ui->cbFilesPath->setItemIcon(pos,mFileSystemModel.iconProvider()->icon(QFileIconProvider::Folder));
+        ui->cbFilesPath->setItemIcon(pos,mFileSystemModel->iconProvider()->icon(QFileIconProvider::Folder));
     }
     ui->cbFilesPath->setCurrentIndex(pos);
     ui->cbFilesPath->lineEdit()->setCursorPosition(1);
@@ -8245,7 +8428,6 @@ void MainWindow::doCompileRun(RunType runType)
 void MainWindow::doGenerateAssembly()
 {
     CompileTarget target =getCompileTarget();
-    QString execName;
     if (target!= CompileTarget::File
             && target != CompileTarget::Project) {
         return;
@@ -8254,6 +8436,19 @@ void MainWindow::doGenerateAssembly()
     //mCompileSuccessionTask->binDirs="";
     mCompileSuccessionTask->type = CompileSuccessionTaskType::RunNormal;
     compile(false,CppCompileType::GenerateAssemblyOnly);
+}
+
+void MainWindow::doGenerateGimple()
+{
+    CompileTarget target =getCompileTarget();
+    if (target!= CompileTarget::File
+            && target != CompileTarget::Project) {
+        return;
+    }
+    mCompileSuccessionTask = std::make_shared<CompileSuccessionTask>();
+    //mCompileSuccessionTask->binDirs="";
+    mCompileSuccessionTask->type = CompileSuccessionTaskType::RunNormal;
+    compile(false,CppCompileType::GenerateGimpleOnly);
 }
 
 void MainWindow::updateProblemCaseOutput(POJProblemCase problemCase)
@@ -8290,7 +8485,7 @@ void MainWindow::applyCurrentProblemCaseChanges()
 {
     QModelIndex idx = ui->tblProblemCases->currentIndex();
     if (idx.isValid()) {
-        POJProblemCase problemCase = mOJProblemModel.getCase(idx.row());
+        POJProblemCase problemCase = mOJProblemModel->getCase(idx.row());
         if (problemCase) {
             if (!fileExists(problemCase->inputFileName))
                 problemCase->input = ui->txtProblemCaseInput->toPlainText();
@@ -8302,7 +8497,7 @@ void MainWindow::applyCurrentProblemCaseChanges()
 void MainWindow::on_btnReplace_clicked()
 {
     //select all items by default
-    PSearchResults results = mSearchResultModel.currentResults();
+    PSearchResults results = mSearchResultModel->currentResults();
     if (!results) {
         return;
     }
@@ -8404,7 +8599,7 @@ bool MainWindow::shouldRemoveAllSettings() const
     return mShouldRemoveAllSettings;
 }
 
-const PToolsManager &MainWindow::toolsManager() const
+ToolsManager *MainWindow::toolsManager() const
 {
     return mToolsManager;
 }
@@ -8490,14 +8685,14 @@ void MainWindow::on_actionEGE_Manual_triggered()
     QDesktopServices::openUrl(QUrl("https://xege.org/ege-open-source"));
 }
 
-const PBookmarkModel &MainWindow::bookmarkModel() const
+BookmarkModel *MainWindow::bookmarkModel() const
 {
     return mBookmarkModel;
 }
 
 TodoModel *MainWindow::todoModel()
 {
-    return &mTodoModel;
+    return mTodoModel;
 }
 
 void MainWindow::on_tableBookmark_doubleClicked(const QModelIndex &index)
@@ -8537,9 +8732,9 @@ void MainWindow::on_actionLocate_in_Files_View_triggered()
     if (editor) {
         QFileInfo fileInfo(editor->filename());
         //qDebug()<<fileInfo.absoluteFilePath();
-        //qDebug()<<includeTrailingPathDelimiter(mFileSystemModel.rootDirectory().absolutePath());
+        //qDebug()<<includeTrailingPathDelimiter(mFileSystemModel->rootDirectory().absolutePath());
         if (!fileInfo.absoluteFilePath().startsWith(
-                    includeTrailingPathDelimiter(mFileSystemModel.rootDirectory().absolutePath()),
+                    includeTrailingPathDelimiter(mFileSystemModel->rootDirectory().absolutePath()),
                     PATH_SENSITIVITY
                     )) {
             QString fileDir = extractFileDir(editor->filename());
@@ -8560,7 +8755,7 @@ void MainWindow::on_actionLocate_in_Files_View_triggered()
             else
                 return;
         }
-        QModelIndex index = mFileSystemModel.index(editor->filename());
+        QModelIndex index = mFileSystemModel->index(editor->filename());
         ui->treeFiles->setCurrentIndex(index);
         ui->treeFiles->scrollTo(index, QAbstractItemView::PositionAtCenter);
         ui->tabExplorer->setCurrentWidget(ui->tabFiles);
@@ -8573,7 +8768,7 @@ void MainWindow::on_treeFiles_doubleClicked(const QModelIndex &index)
 {
     if (index!=ui->treeFiles->currentIndex())
         return;
-    QString filepath = mFileSystemModel.filePath(index);
+    QString filepath = mFileSystemModel->filePath(index);
     QFileInfo file(filepath);
     if (file.isFile()) {
         switch (getFileType(filepath)) {
@@ -8619,7 +8814,7 @@ void MainWindow::on_actionRun_Parameters_triggered()
 
 void MainWindow::onNewProblemSet()
 {
-    if (mOJProblemSetModel.count()>0) {
+    if (mOJProblemSetModel->count()>0) {
         if (QMessageBox::warning(this,
                              tr("New Problem Set"),
                              tr("The current problem set is not empty.")
@@ -8630,25 +8825,25 @@ void MainWindow::onNewProblemSet()
         }
     }
     mOJProblemSetNameCounter++;
-    mOJProblemSetModel.create(tr("Problem Set %1").arg(mOJProblemSetNameCounter));
-    ui->lblProblemSet->setText(mOJProblemSetModel.name());
+    mOJProblemSetModel->create(tr("Problem Set %1").arg(mOJProblemSetNameCounter));
+    ui->lblProblemSet->setText(mOJProblemSetModel->name());
     onProblemSetIndexChanged(QModelIndex(),QModelIndex());
 }
 
 
 void MainWindow::onAddProblem()
 {
-    int startCount = mOJProblemSetModel.count();
+    int startCount = mOJProblemSetModel->count();
     QString name;
     while (true) {
         name = tr("Problem %1").arg(startCount+1);
-        if (!mOJProblemSetModel.problemNameUsed(name))
+        if (!mOJProblemSetModel->problemNameUsed(name))
             break;
     }
     POJProblem problem = std::make_shared<OJProblem>();
     problem->name = name;
-    mOJProblemSetModel.addProblem(problem);
-    ui->lstProblemSet->setCurrentIndex(mOJProblemSetModel.index(mOJProblemSetModel.count()-1));
+    mOJProblemSetModel->addProblem(problem);
+    ui->lstProblemSet->setCurrentIndex(mOJProblemSetModel->index(mOJProblemSetModel->count()-1));
     mProblem_Properties->trigger();
 }
 
@@ -8658,7 +8853,7 @@ void MainWindow::onRemoveProblem()
     if (ui->lstProblemSet->selectionModel()->selectedIndexes().isEmpty()) {
         QModelIndex idx=ui->lstProblemSet->currentIndex();
         if (idx.isValid())
-            mOJProblemSetModel.removeProblem(idx.row());
+            mOJProblemSetModel->removeProblem(idx.row());
     } else {
         QList<int> idxList;
         foreach (const QModelIndex idx,ui->lstProblemSet->selectionModel()->selectedIndexes()) {
@@ -8671,7 +8866,7 @@ void MainWindow::onRemoveProblem()
         });
         bool oldBlock = ui->lstProblemSet->selectionModel()->blockSignals(true);
         for (int i=0;i<idxList.count();i++) {
-            mOJProblemSetModel.removeProblem(idxList[i]);
+            mOJProblemSetModel->removeProblem(idxList[i]);
         }
         ui->lstProblemSet->selectionModel()->blockSignals(oldBlock);
         onProblemSetIndexChanged(ui->lstProblemSet->currentIndex(),QModelIndex());
@@ -8683,9 +8878,9 @@ void MainWindow::onSaveProblemSet()
 {
     QFileDialog dialog(this);
     dialog.setWindowTitle(tr("Save Problem Set"));
-    if (!mOJProblemSetModel.exportFilename().isEmpty()) {
-        dialog.setDirectory(mOJProblemSetModel.exportFilename());
-        dialog.selectFile(mOJProblemSetModel.exportFilename());
+    if (!mOJProblemSetModel->exportFilename().isEmpty()) {
+        dialog.setDirectory(mOJProblemSetModel->exportFilename());
+        dialog.selectFile(mOJProblemSetModel->exportFilename());
     } else {
         dialog.setDirectory(QDir().absolutePath());
     }
@@ -8694,7 +8889,8 @@ void MainWindow::onSaveProblemSet()
     dialog.setFileMode(QFileDialog::AnyFile);
     dialog.setAcceptMode(QFileDialog::AcceptSave);
     if (dialog.exec() == QDialog::Accepted) {
-        QString fileName=dialog.selectedFiles()[0];
+        QStringList selectedFiles = dialog.selectedFiles();
+        QString fileName = selectedFiles.first();
         QFileInfo fileInfo(fileName);
         if (fileInfo.suffix().isEmpty()) {
             fileName.append(".pbs");
@@ -8705,7 +8901,7 @@ void MainWindow::onSaveProblemSet()
             int currentIndex=-1;
             if (ui->lstProblemSet->currentIndex().isValid())
                 currentIndex = ui->lstProblemSet->currentIndex().row();
-            mOJProblemSetModel.saveToFile(fileName,currentIndex);
+            mOJProblemSetModel->saveToFile(fileName,currentIndex);
         } catch (FileError& error) {
             QMessageBox::critical(this,tr("Save Error"),
                                   error.reason());
@@ -8725,10 +8921,10 @@ void MainWindow::onLoadProblemSet()
         QDir::setCurrent(extractFileDir(fileName));
         try {
             int currentIndex;
-            mOJProblemSetModel.loadFromFile(fileName,currentIndex);
+            mOJProblemSetModel->loadFromFile(fileName,currentIndex);
             if (currentIndex>=0) {
                 if (currentIndex>=0) {
-                    QModelIndex index = mOJProblemSetModel.index(currentIndex,0);
+                    QModelIndex index = mOJProblemSetModel->index(currentIndex,0);
                     ui->lstProblemSet->setCurrentIndex(index);
                     ui->lstProblemSet->scrollTo(index);
                 }
@@ -8738,30 +8934,30 @@ void MainWindow::onLoadProblemSet()
                                   error.reason());
         }
     }
-    ui->lblProblemSet->setText(mOJProblemSetModel.name());
-    ui->lstProblemSet->setCurrentIndex(mOJProblemSetModel.index(0,0));
+    ui->lblProblemSet->setText(mOJProblemSetModel->name());
+    ui->lstProblemSet->setCurrentIndex(mOJProblemSetModel->index(0,0));
 }
 
 
 void MainWindow::onAddProblemCase()
 {
-    int startCount = mOJProblemModel.count();
+    int startCount = mOJProblemModel->count();
     QString name;
     while (true) {
         name = tr("Problem Case %1").arg(startCount+1);
-        if (!mOJProblemSetModel.problemNameUsed(name))
+        if (!mOJProblemSetModel->problemNameUsed(name))
             break;
     }
     POJProblemCase problemCase = std::make_shared<OJProblemCase>();
     problemCase->name = name;
     problemCase->testState = ProblemCaseTestState::NotTested;
-    mOJProblemModel.addCase(problemCase);
-    ui->tblProblemCases->setCurrentIndex(mOJProblemModel.index(mOJProblemModel.count()-1,0));
+    mOJProblemModel->addCase(problemCase);
+    ui->tblProblemCases->setCurrentIndex(mOJProblemModel->index(mOJProblemModel->count()-1,0));
 }
 
 void MainWindow::onProblemRunAllCases()
 {    
-    if (mOJProblemModel.count()<=0)
+    if (mOJProblemModel->count()<=0)
         return;
     showHideMessagesTab(ui->tabProblem,ui->actionProblem);
     applyCurrentProblemCaseChanges();
@@ -8795,14 +8991,14 @@ void MainWindow::onRemoveProblemCases()
 {
     QModelIndex idx = ui->tblProblemCases->currentIndex();
     if (idx.isValid()) {
-        mOJProblemModel.removeCase(idx.row());
+        mOJProblemModel->removeCase(idx.row());
     }
 }
 
 
 void MainWindow::onOpenProblemAnswerFile()
 {
-    POJProblem problem = mOJProblemModel.problem();
+    POJProblem problem = mOJProblemModel->problem();
     if (!problem || problem->answerProgram.isEmpty())
         return;
     Editor *e = openFile(problem->answerProgram);
@@ -9091,7 +9287,7 @@ void MainWindow::on_actionNew_Header_triggered()
         PProjectUnit newUnit=mProject->addUnit(headerFilename,mProject->rootNode());
         mProject->saveAll();
 
-        parseFileList(mProject->cppParser());
+        parseFileListNonBlocking(mProject->cppParser());
         setProjectViewCurrentUnit(newUnit);
         updateProjectView();
 
@@ -9168,7 +9364,7 @@ void MainWindow::on_actionNew_Class_triggered()
         newUnit=mProject->addUnit(sourceFilename,mProject->rootNode());
         setProjectViewCurrentUnit(newUnit);
         mProject->saveAll();
-        parseFileList(mProject->cppParser());
+        parseFileListNonBlocking(mProject->cppParser());
         updateProjectView();
 
         openFile(headerFilename);
@@ -9190,11 +9386,11 @@ void MainWindow::on_actionGit_Create_Repository_triggered()
             ui->cbFilesPath->setItemIcon(pos, pIconsManager->getIcon(IconsManager::FILESYSTEM_GIT));
         }
         mFileSystemModelIconProvider.setRootFolder(pSettings->environment().currentFolder());
-        mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
+        mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
         //update project view
-        if (mProject && mProject->folder() == mFileSystemModel.rootPath()) {
+        if (mProject && mProject->folder() == mFileSystemModel->rootPath()) {
             mProject->addUnit(includeTrailingPathDelimiter(mProject->folder())+".gitignore", mProject->rootNode());
-        } else if (mProject && mFileSystemModel.index(mProject->folder()).isValid()) {
+        } else if (mProject && mFileSystemModel->index(mProject->folder()).isValid()) {
             mProject->model()->refreshIcons();
         }
     } else if (ui->projectView->isVisible() && mProject) {
@@ -9211,8 +9407,8 @@ void MainWindow::on_actionGit_Create_Repository_triggered()
         mProject->addUnit(ignoreFile, mProject->rootNode());
         createFile(ignoreFile);
         mProject->saveAll();
-        if (mProject->folder() == mFileSystemModel.rootPath()
-                || mFileSystemModel.rootPath().startsWith(includeTrailingPathDelimiter(mProject->folder()), PATH_SENSITIVITY)) {
+        if (mProject->folder() == mFileSystemModel->rootPath()
+                || mFileSystemModel->rootPath().startsWith(includeTrailingPathDelimiter(mProject->folder()), PATH_SENSITIVITY)) {
 
             //update files view;
             int pos = ui->cbFilesPath->findText(pSettings->environment().currentFolder());
@@ -9220,7 +9416,7 @@ void MainWindow::on_actionGit_Create_Repository_triggered()
                 ui->cbFilesPath->setItemIcon(pos, pIconsManager->getIcon(IconsManager::FILESYSTEM_GIT));
             }
             mFileSystemModelIconProvider.update();
-            mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
+            mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
         }
     }
 }
@@ -9233,12 +9429,12 @@ void MainWindow::on_actionGit_Add_Files_triggered()
         QModelIndexList indices = ui->treeFiles->selectionModel()->selectedRows();
         QString output;
         foreach (const QModelIndex index,indices) {
-            QFileInfo info = mFileSystemModel.fileInfo(index);
+            QFileInfo info = mFileSystemModel->fileInfo(index);
             vcsManager.add(info.absolutePath(),info.fileName(),output);
         }
         //update icons in files view
         mFileSystemModelIconProvider.update();
-        mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
+        mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
     } else if (ui->projectView->isVisible() && mProject) {
         GitManager vcsManager;
         QModelIndexList indices = ui->projectView->selectionModel()->selectedRows();
@@ -9260,7 +9456,7 @@ void MainWindow::on_actionGit_Add_Files_triggered()
 
     //update icons in files view too
     mFileSystemModelIconProvider.update();
-    mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
+    mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
 }
 
 
@@ -9313,7 +9509,7 @@ void MainWindow::on_actionGit_Commit_triggered()
         }
         //update files view
         mFileSystemModelIconProvider.update();
-        mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
+        mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
     }
     if (!output.isEmpty()) {
         InfoMessageBox infoBox;
@@ -9342,7 +9538,7 @@ void MainWindow::on_actionGit_Restore_triggered()
         }
         //update files view
         mFileSystemModelIconProvider.update();
-        mFileSystemModel.setIconProvider(&mFileSystemModelIconProvider);
+        mFileSystemModel->setIconProvider(&mFileSystemModelIconProvider);
     }
     if (!output.isEmpty()) {
         InfoMessageBox infoBox;
@@ -9534,11 +9730,11 @@ void MainWindow::on_actionWebsite_triggered()
 
 void MainWindow::on_actionFilesView_Hide_Non_Support_Files_toggled(bool /* arg1 */)
 {
-    mFileSystemModel.setNameFilterDisables(!ui->actionFilesView_Hide_Non_Support_Files->isChecked());
-    if (!mFileSystemModel.nameFilterDisables()) {
-        mFileSystemModel.setNameFilters(pSystemConsts->defaultFileNameFilters());
+    mFileSystemModel->setNameFilterDisables(!ui->actionFilesView_Hide_Non_Support_Files->isChecked());
+    if (!mFileSystemModel->nameFilterDisables()) {
+        mFileSystemModel->setNameFilters(pSystemConsts->defaultFileNameFilters());
     } else {
-        mFileSystemModel.setNameFilters(QStringList());
+        mFileSystemModel->setNameFilters(QStringList());
     }
     if (pSettings->environment().hideNonSupportFilesInFileView()
             != ui->actionFilesView_Hide_Non_Support_Files->isChecked()) {
@@ -9575,7 +9771,7 @@ void MainWindow::on_btnProblemCaseInputFileName_clicked()
                 tr("All files (*.*)"));
     if (!fileName.isEmpty()) {
         QModelIndex idx = ui->tblProblemCases->currentIndex();
-        POJProblemCase problemCase = mOJProblemModel.getCase(idx.row());
+        POJProblemCase problemCase = mOJProblemModel->getCase(idx.row());
         if (!problemCase)
             return;
         if (problemCase->inputFileName == fileName)
@@ -9602,7 +9798,7 @@ void MainWindow::on_btnProblemCaseInputFileName_clicked()
 void MainWindow::on_btnProblemCaseClearExpectedOutputFileName_clicked()
 {
     QModelIndex idx = ui->tblProblemCases->currentIndex();
-    POJProblemCase problemCase = mOJProblemModel.getCase(idx.row());
+    POJProblemCase problemCase = mOJProblemModel->getCase(idx.row());
     if (!problemCase)
         return;
     problemCase->expectedOutputFileName = "";
@@ -9613,7 +9809,7 @@ void MainWindow::on_btnProblemCaseClearExpectedOutputFileName_clicked()
 void MainWindow::on_btnProblemCaseClearInputFileName_clicked()
 {
     QModelIndex idx = ui->tblProblemCases->currentIndex();
-    POJProblemCase problemCase = mOJProblemModel.getCase(idx.row());
+    POJProblemCase problemCase = mOJProblemModel->getCase(idx.row());
     if (!problemCase)
         return;
     problemCase->inputFileName = "";
@@ -9630,7 +9826,7 @@ void MainWindow::on_btnProblemCaseExpectedOutputFileName_clicked()
                 tr("All files (*.*)"));
     if (!fileName.isEmpty()) {
         QModelIndex idx = ui->tblProblemCases->currentIndex();
-        POJProblemCase problemCase = mOJProblemModel.getCase(idx.row());
+        POJProblemCase problemCase = mOJProblemModel->getCase(idx.row());
         if (!problemCase)
             return;
         if (problemCase->expectedOutputFileName == fileName)
@@ -9659,14 +9855,14 @@ void MainWindow::on_txtProblemCaseOutput_cursorPositionChanged()
 
 void MainWindow::on_txtProblemCaseExpected_cursorPositionChanged()
 {
-    QTextCursor cursor = ui->txtProblemCaseExpected->textCursor();
+    //QTextCursor cursor = ui->txtProblemCaseExpected->textCursor();
     //ui->lblProblemCaseExpected->setText(tr("Line %1").arg(cursor.block().firstLineNumber()+1));
 }
 
 
 void MainWindow::on_txtProblemCaseInput_cursorPositionChanged()
 {
-    QTextCursor cursor = ui->txtProblemCaseInput->textCursor();
+    //QTextCursor cursor = ui->txtProblemCaseInput->textCursor();
     //ui->lblProblemCaseInput->setText(tr("Line %1").arg(cursor.block().firstLineNumber()+1));
 }
 
@@ -9885,9 +10081,9 @@ void MainWindow::onImportFPSProblemSet()
     if (!fileName.isEmpty()) {
         try {
             QList<POJProblem> problems = importFreeProblemSet(fileName);
-            mOJProblemSetModel.addProblems(problems);
-            ui->lblProblemSet->setText(mOJProblemSetModel.name());
-            ui->lstProblemSet->setCurrentIndex(mOJProblemSetModel.index(0,0));
+            mOJProblemSetModel->addProblems(problems);
+            ui->lblProblemSet->setText(mOJProblemSetModel->name());
+            ui->lstProblemSet->setCurrentIndex(mOJProblemSetModel->index(0,0));
         } catch (FileError& error) {
             QMessageBox::critical(this,tr("Load Error"),
                                   error.reason());
@@ -9915,7 +10111,7 @@ void MainWindow::onExportFPSProblemSet()
                 tr("FPS Problem Set Files (*.fps)"));
     if (!fileName.isEmpty()) {
         try {
-            exportFreeProblemSet(mOJProblemSetModel.problems(),fileName);
+            exportFreeProblemSet(mOJProblemSetModel->problems(),fileName);
         } catch (FileError& error) {
             QMessageBox::critical(this,tr("Export Error"),
                                   error.reason());
@@ -10245,5 +10441,64 @@ void MainWindow::on_actionCode_Completion_triggered()
     if (editor) {
         editor->showCodeCompletion();
     }
+}
+
+
+void MainWindow::on_actionC_C_Header_triggered()
+{
+    Editor* editor = mEditorList->getEditor();
+    if (editor) {
+        editor->setFileType(FileType::CCppHeader);
+    }
+}
+
+void MainWindow::on_actionText_File_triggered()
+{
+    Editor* editor = mEditorList->getEditor();
+    if (editor) {
+        editor->setFileType(FileType::Text);
+    }
+}
+
+
+void MainWindow::on_actionC_File_triggered()
+{
+    Editor* editor = mEditorList->getEditor();
+    if (editor) {
+        editor->setFileType(FileType::CSource);
+    }
+}
+
+
+void MainWindow::on_actionCPP_File_triggered()
+{
+    Editor* editor = mEditorList->getEditor();
+    if (editor) {
+        editor->setFileType(FileType::CppSource);
+    }
+}
+
+
+void MainWindow::on_actionATT_ASM_triggered()
+{
+    Editor* editor = mEditorList->getEditor();
+    if (editor) {
+        editor->setFileType(FileType::ATTASM);
+    }
+}
+
+
+void MainWindow::on_actionIntel_ASM_triggered()
+{
+    Editor* editor = mEditorList->getEditor();
+    if (editor) {
+        editor->setFileType(FileType::INTELASM);
+    }
+}
+
+
+void MainWindow::on_actionGenerate_GIMPLE_triggered()
+{
+    doGenerateGimple();
 }
 

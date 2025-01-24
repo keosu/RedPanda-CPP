@@ -37,19 +37,22 @@ using SimpleIni = CSimpleIniA;
 using PSimpleIni = std::shared_ptr<SimpleIni>;
 
 enum class FileType{
-    GAS, // GNU assembler source file (.s)
+    None,
+    ATTASM, // AT&T assembler source file (.s)
+    INTELASM, // Intel assembler source file (.s)
     LUA, // lua file (.lua)
     CSource, // c source file (.c)
     CppSource, // c++ source file (.cpp)
-    CHeader, // c header (.h)
-    CppHeader, // c++ header (.hpp)
+    CCppHeader, // c header (.h)
+    GIMPLE, // gcc gimple file (.gimple)
     WindowsResourceSource, // resource source (.res)
     Project, //Red Panda C++ Project (.dev)
     Text, // text file
     FragmentShader,
     VerticeShader,
     ModuleDef, // Windows Module Definition
-    Other // any others
+    MakeFile,
+    Other, // any others
 };
 
 enum class SearchFileScope {
@@ -131,8 +134,23 @@ struct NonExclusiveTemporaryFileOwner {
 using PNonExclusiveTemporaryFileOwner = std::unique_ptr<NonExclusiveTemporaryFileOwner>;
 
 FileType getFileType(const QString& filename);
+QString fileTypeToName(FileType fileType);
+FileType nameToFileType(const QString& name);
+constexpr bool isASMSourceFile(FileType fileType) {
+    return fileType == FileType::ATTASM || fileType == FileType::INTELASM;
+}
+constexpr bool isC_CPPSourceFile(FileType fileType) {
+    return fileType == FileType::CSource || fileType == FileType::CppSource;
+}
+constexpr bool isC_CPPHeaderFile(FileType fileType) {
+    return fileType == FileType::CCppHeader;
+}
+constexpr bool isC_CPP_ASMSourceFile(FileType fileType) {
+    return fileType == FileType::CSource || fileType == FileType::CppSource
+            || fileType == FileType::ATTASM || fileType == FileType::INTELASM;
+}
 
-bool programHasConsole(const QString& filename);
+bool programIsWin32GuiApp(const QString& filename);
 
 QString parseMacros(const QString& s);
 QString parseMacros(const QString& s, const QMap<QString, QString>& variables);
@@ -143,12 +161,18 @@ void resetCppParser(std::shared_ptr<CppParser> parser, int compilerSetIndex=-1);
 
 int getNewFileNumber();
 
-QByteArray runAndGetOutput(const QString& cmd, const QString& workingDir, const QStringList& arguments,
+struct ProcessOutput
+{
+    QByteArray standardOutput;
+    QByteArray standardError;
+    QString errorMessage;
+};
+
+ProcessOutput runAndGetOutput(const QString& cmd, const QString& workingDir, const QStringList& arguments,
                            const QByteArray& inputContent = QByteArray(),
+                           bool separateStderr = false,
                            bool inheritEnvironment = false,
                            const QProcessEnvironment& env = QProcessEnvironment() );
-
-QByteArray reformatContentUsingAstyle(const QByteArray& content, const QStringList& arguments);
 
 void openFileFolderInExplorer(const QString& path);
 
@@ -182,7 +206,8 @@ QByteArray getHTTPBody(const QByteArray& content);
 QString getSizeString(int size);
 
 class QComboBox;
-void saveComboHistory(QComboBox* cb,const QString& text);
+void setComboTextAndHistory(QComboBox *cb, const QString& newText, QStringList &historyList);
+void updateComboHistory(QStringList &historyList, const QString &newKey);
 
 QColor alphaBlend(const QColor &lower, const QColor &upper);
 
@@ -203,5 +228,22 @@ QByteArray stringToByteArray(const QString& content, bool isUTF8);
 std::tuple<QString, QStringList, PNonExclusiveTemporaryFileOwner> wrapCommandForTerminalEmulator(const QString &terminal, const QStringList &argsPattern, const QStringList &payloadArgsWithArgv0);
 
 std::tuple<QString, QStringList, PNonExclusiveTemporaryFileOwner> wrapCommandForTerminalEmulator(const QString &terminal, const QString &argsPattern, const QStringList &payloadArgsWithArgv0);
+
+struct ExternalResource {
+    ExternalResource();
+    ~ExternalResource();
+};
+
+template <typename T, typename D>
+std::unique_ptr<T, D> resourcePointer(T *pointer, D deleter)
+{
+    return {pointer, deleter};
+}
+
+#ifdef Q_OS_WINDOWS
+bool applicationHasUtf8Manifest(const wchar_t *path);
+bool osSupportsUtf8Manifest();
+bool applicationIsUtf8(const QString &path);
+#endif
 
 #endif // UTILS_H

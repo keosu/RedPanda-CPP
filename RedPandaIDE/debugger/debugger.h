@@ -301,6 +301,8 @@ class Debugger : public QObject
 public:
     explicit Debugger(QObject *parent = nullptr);
     ~Debugger();
+    Debugger(const Debugger&) = delete;
+    Debugger& operator= (const Debugger&) = delete;
     // Play/pause
     bool startClient(
             int compilerSetIndex,
@@ -374,7 +376,7 @@ public:
 
     std::shared_ptr<BacktraceModel> backtraceModel();
     std::shared_ptr<BreakpointModel> breakpointModel();
-    bool executing() const;
+    bool executing();
 
     int leftPageIndexBackup() const;
     void setLeftPageIndexBackup(int leftPageIndexBackup);
@@ -401,6 +403,7 @@ signals:
     void evalValueReady(const QString& s);
     void memoryExamineReady(const QStringList& s);
     void localsReady(const QStringList& s);
+    void debugFinished();
 public slots:
     void stop();
     void refreshAll();
@@ -422,13 +425,12 @@ private slots:
     void updateEval(const QString& value);
     void updateDisassembly(const QString& file, const QString& func,const QStringList& value);
     void onChangeDebugConsoleLastline(const QString& text);
-    void cleanUpReader();
+    void cleanUp();
     void updateRegisterNames(const QStringList& registerNames);
     void updateRegisterValues(const QHash<int,QString>& values);
     void fetchVarChildren(const QString& varName);
 private:
-    bool mExecuting;
-    bool mCommandChanged;
+    //bool mCommandChanged;
     std::shared_ptr<BreakpointModel> mBreakpointModel;
     std::shared_ptr<BacktraceModel> mBacktraceModel;
     std::shared_ptr<WatchModel> mWatchModel;
@@ -445,6 +447,7 @@ private:
     qint64 mProjectLastLoadtime;
     QString mCurrentSourceFile;
     bool mInferiorHasBreakpoints;
+    QRecursiveMutex mClientMutex;
 };
 
 class DebugTarget: public QThread {
@@ -469,7 +472,6 @@ private:
     QString mGDBServer;
     int mPort;
     bool mStop;
-    std::shared_ptr<QProcess> mProcess;
     QSemaphore mStartSemaphore;
     bool mErrorOccured;
     QString mInputFile;

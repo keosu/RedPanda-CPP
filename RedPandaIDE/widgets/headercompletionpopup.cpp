@@ -27,9 +27,11 @@
 #include "../colorscheme.h"
 #include <qsynedit/constants.h>
 
-HeaderCompletionPopup::HeaderCompletionPopup(QWidget* parent):QWidget(parent)
+HeaderCompletionPopup::HeaderCompletionPopup(QWidget* parent):QWidget{parent},
+    mListView{nullptr}
 {
     setWindowFlags(Qt::Popup);
+
     mListView = new CodeCompletionListView(this);
     mModel=new HeaderCompletionListModel(&mCompletionList, 0);
     QItemSelectionModel *m=mListView->selectionModel();
@@ -318,13 +320,11 @@ void HeaderCompletionPopup::hideEvent(QHideEvent *)
 bool HeaderCompletionPopup::event(QEvent *event)
 {
     bool result = QWidget::event(event);
-    switch (event->type()) {
-    case QEvent::FontChange:
-        mListView->setFont(font());
-        mDelegate->setFont(font());
-        break;
-    default:
-        break;
+    if (event->type() == QEvent::FontChange) {
+        if (mListView) {
+            mListView->setFont(font());
+            mDelegate->setFont(font());
+        }
     }
     return result;
 }

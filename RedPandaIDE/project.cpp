@@ -16,6 +16,7 @@
  */
 #include "project.h"
 #include "editor.h"
+#include "qt_utils/utils.h"
 #include "utils.h"
 #include "systemconsts.h"
 #include "editorlist.h"
@@ -31,7 +32,6 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
-#include <QTextCodec>
 #include <QMessageBox>
 #include <QDirIterator>
 #include <QMimeDatabase>
@@ -162,7 +162,7 @@ QString Project::outputFilename() const
         exePath = directory();
     }
     QDir exeDir(exePath);
-    return exeDir.filePath(exeFileName);
+    return QDir::cleanPath(exeDir.filePath(exeFileName));
 }
 
 QString Project::makeFileName()
@@ -255,7 +255,7 @@ void Project::open()
         if (newUnit->encoding()!=ENCODING_UTF16_BOM &&
                 newUnit->encoding()!=ENCODING_UTF8_BOM &&
                 newUnit->encoding()!=ENCODING_UTF32_BOM &&
-                QTextCodec::codecForName(newUnit->encoding())==nullptr) {
+                !isEncodingAvailable(newUnit->encoding())) {
             newUnit->setEncoding(ENCODING_PROJECT);
         }
         newUnit->setRealEncoding(ini.GetValue(groupName, "RealEncoding",ENCODING_ASCII));
@@ -391,7 +391,7 @@ Editor* Project::openUnit(PProjectUnit& unit, bool forceOpen) {
         if (encoding==ENCODING_PROJECT)
             encoding=options().encoding;
 
-        editor = mEditorList->newEditor(unit->fileName(), encoding, this, false);
+        editor = mEditorList->newEditor(unit->fileName(), encoding, FileType::None, QString(), this, false);
         if (editor) {
             //editor->setProject(this);
             //unit->setEncoding(encoding);
@@ -420,7 +420,7 @@ Editor *Project::openUnit(PProjectUnit &unit, const PProjectEditorLayout &layout
         encoding = unit->encoding();
         if (encoding==ENCODING_PROJECT)
             encoding=options().encoding;
-        editor = mEditorList->newEditor(unit->fileName(), encoding, this, false);
+        editor = mEditorList->newEditor(unit->fileName(), encoding, FileType::None, QString(), this, false);
         if (editor) {
             //editor->setInProject(true);
             editor->setCaretY(layout->caretY);
@@ -480,7 +480,6 @@ void Project::rebuildNodes()
     case ProjectModelType::Custom:
         createFolderNodes();
         foreach (PProjectUnit pUnit, mUnits) {
-            QFileInfo fileInfo(pUnit->fileName());
             pUnit->setNode(
                         makeNewFileNode(
                             pUnit,
@@ -494,7 +493,6 @@ void Project::rebuildNodes()
         createFileSystemFolderNodes();
 
         foreach (PProjectUnit pUnit, mUnits) {
-            QFileInfo fileInfo(pUnit->fileName());
             pUnit->setNode(
                         makeNewFileNode(
                             pUnit,
@@ -714,7 +712,7 @@ void Project::renameUnit(PProjectUnit& unit, const QString &newFileName)
         copyFile(unit->fileName(),newFileName,true);
     }
     if (mParser)
-        mParser->parseFile(newFileName,true);
+        parseFileNonBlocking(mParser,newFileName,true, editor->contextFile());
 
     internalRemoveUnit(unit,false,true);
 
@@ -767,9 +765,8 @@ bool Project::saveUnits()
                             unit->fileName())));
         count++;
         switch(getFileType(unit->fileName())) {
-        case FileType::CHeader:
+        case FileType::CCppHeader:
         case FileType::CSource:
-        case FileType::CppHeader:
         case FileType::CppSource:
             ini.SetLongValue(groupName,"CompileCpp", unit->compileCpp());
             break;
@@ -944,11 +941,9 @@ bool Project::assignTemplate(const std::shared_ptr<ProjectTemplate> aTemplate, b
     updateCompilerSetting();
     mOptions.icon = aTemplate->icon();
 
-    QTextCodec* codec=QTextCodec::codecForName(mOptions.encoding);
-    if (!codec)
+    if (!isEncodingAvailable(mOptions.encoding))
         mOptions.encoding=ENCODING_SYSTEM_DEFAULT;
-    codec=QTextCodec::codecForName(mOptions.execEncoding);
-    if (!codec)
+    if (!isEncodingAvailable(mOptions.execEncoding))
         mOptions.execEncoding=ENCODING_SYSTEM_DEFAULT;
 
     // Copy icon to project directory
@@ -983,11 +978,13 @@ bool Project::assignTemplate(const std::shared_ptr<ProjectTemplate> aTemplate, b
                 }
 
                 FileType fileType=getFileType(unit->fileName());
-                if ( fileType==FileType::GAS
-                        || isCFile(unit->fileName()) || isHFile(unit->fileName())) {
+                if ( isC_CPP_ASMSourceFile(fileType)
+                        || isC_CPPHeaderFile(fileType)) {
                     Editor * editor = mEditorList->newEditor(
                                 unit->fileName(),
                                 unit->encoding()==ENCODING_PROJECT?options().encoding:unit->encoding(),
+                                FileType::None,
+                                QString(),
                                 this,
                                 false);
                     editor->activate();
@@ -1002,10 +999,11 @@ bool Project::assignTemplate(const std::shared_ptr<ProjectTemplate> aTemplate, b
                     s = templateUnit->CText;
                     unit = newUnit(mRootNode,templateUnit->CName);
                 }
-
                 Editor * editor = mEditorList->newEditor(
                             unit->fileName(),
                             unit->encoding()==ENCODING_PROJECT?options().encoding:unit->encoding(),
+                            FileType::None,
+                            QString(),
                             this,
                             true);
 
@@ -1124,8 +1122,7 @@ bool Project::saveAsTemplate(const QString &templateFolder,
             ini->SetValue(section,"Cpp", unitName.toUtf8());
             ini->SetValue(section,"CppName", unitName.toUtf8());
             break;
-        case FileType::CHeader:
-        case FileType::CppHeader:
+        case FileType::CCppHeader:
             ini->SetValue(section,"C", unitName.toUtf8());
             ini->SetValue(section,"CName", unitName.toUtf8());
             ini->SetValue(section,"Cpp", unitName.toUtf8());
@@ -1311,7 +1308,8 @@ PProjectUnit Project::internalAddUnit(const QString &inFileName, PProjectModelNo
 
   // Determine compilation flags
     switch(getFileType(inFileName)) {
-    case FileType::GAS:
+    case FileType::ATTASM:
+    case FileType::INTELASM:
         newUnit->setCompile(true);
         newUnit->setCompileCpp(false);
         newUnit->setLink(true);
@@ -2611,7 +2609,7 @@ QVariant ProjectModel::data(const QModelIndex &index, int role) const
         if (p->isUnit) {
             PProjectUnit unit = p->pUnit.lock();
             if (unit)
-                icon = mIconProvider->icon(unit->fileName());
+                icon = mIconProvider->icon(QFileInfo(unit->fileName()));
         } else {
             if (p == mProject->rootNode().get()) {
 #ifdef ENABLE_VCS

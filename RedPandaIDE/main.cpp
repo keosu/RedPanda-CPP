@@ -14,59 +14,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "mainwindow.h"
-#include "settings.h"
-#include "systemconsts.h"
-#include "utils.h"
-#include <QApplication>
-#include <QDir>
-#include <QTranslator>
-#include <QStandardPaths>
-#include <QMessageBox>
-#include <QStringList>
-#include <QAbstractNativeEventFilter>
-#include <QDir>
-#include <QScreen>
-#include <QLockFile>
-#include <QFontDatabase>
-#include "common.h"
-#include "colorscheme.h"
-#include "iconsmanager.h"
-#include "autolinkmanager.h"
-#include <qt_utils/charsetinfo.h>
-#include "parser/parserutils.h"
-#include "editorlist.h"
-#include "widgets/choosethemedialog.h"
-#include "thememanager.h"
-#include "utils/font.h"
-#include "problems/ojproblemset.h"
+#include "main.h"
 
 #ifdef Q_OS_WIN
-#include <QTemporaryFile>
-#include <windows.h>
-#include <psapi.h>
-#include <QSharedMemory>
-#include <QBuffer>
-#include <winuser.h>
-#include <QFontDatabase>
-
-#include "widgets/cpudialog.h"
-#endif
-
-QString getSettingFilename(const QString& filepath, bool& firstRun);
-#ifdef Q_OS_WIN
-class WindowLogoutEventFilter : public QAbstractNativeEventFilter {
-
-    // QAbstractNativeEventFilter interface
-public:
-    bool nativeEventFilter(const QByteArray &eventType, void *message, long *result) override;
-};
-
-#ifndef WM_DPICHANGED
-# define WM_DPICHANGED 0x02e0
-#endif
-
-#define WM_APP_OPEN_FILE (WM_APP + 6736 /* “OPEN” on dial pad */)
 static_assert(WM_APP_OPEN_FILE < 0xc000);
 
 HWND prevAppInstance = NULL;
@@ -124,7 +74,12 @@ HWND getPreviousInstance() {
         return NULL;
 }
 
-bool WindowLogoutEventFilter::nativeEventFilter(const QByteArray & /*eventType*/, void *message, long *result){
+#if QT_VERSION_MAJOR >= 6
+bool WindowLogoutEventFilter::nativeEventFilter(const QByteArray & /*eventType*/, void *message, qintptr *result)
+#else
+bool WindowLogoutEventFilter::nativeEventFilter(const QByteArray & /*eventType*/, void *message, long *result)
+#endif
+{
     MSG * pMsg = static_cast<MSG *>(message);
     switch(pMsg->message) {
     case WM_QUERYENDSESSION:
@@ -202,6 +157,24 @@ bool sendFilesToInstance() {
 }
 #endif
 
+BlockWheelEventFiler::BlockWheelEventFiler(QObject* parent):QObject(parent) {}
+
+BlockWheelEventFiler::~BlockWheelEventFiler()
+{
+
+} ;
+bool BlockWheelEventFiler::eventFilter(QObject *watched, QEvent *event)
+{
+    //Prevent QComboBox wheel event
+    if (event->type() == QEvent::Wheel
+            && !pSettings->environment().comboboxWheel()) {
+        QComboBox *p=qobject_cast<QComboBox*>(watched);
+        if (p && !(p->view() && p->view()->isVisible()))
+            return true;
+    }
+    return false;
+}
+
 QString getSettingFilename(const QString& filepath, bool& firstRun) {
     QString filename;
     if (filepath.isEmpty()) {
@@ -209,7 +182,8 @@ QString getSettingFilename(const QString& filepath, bool& firstRun) {
             filename = includeTrailingPathDelimiter(QApplication::applicationDirPath()) +
                     "config/"  + APP_SETTSINGS_FILENAME;
         } else {
-            filename =includeTrailingPathDelimiter(QStandardPaths::standardLocations(QStandardPaths::AppDataLocation)[0])
+            QStringList appLocations = QStandardPaths::standardLocations(QStandardPaths::AppDataLocation);
+            filename =includeTrailingPathDelimiter(appLocations.first())
                  + APP_SETTSINGS_FILENAME;
         }
     } else {
@@ -277,8 +251,10 @@ int main(int argc, char *argv[])
 #endif
 
     QApplication app(argc, argv);
-
+#if QT_VERSION_MAJOR < 6
     app.setAttribute(Qt::AA_UseHighDpiPixmaps);
+#endif
+    ExternalResource resource;
 
     QLockFile lockFile(QDir::tempPath()+QDir::separator()+"RedPandaDevCppStartUp.lock");
     {
@@ -320,7 +296,8 @@ int main(int argc, char *argv[])
     bool firstRun;
     QString settingFilename = getSettingFilename(QString(), firstRun);
     if (!isGreenEdition()) {
-        QDir::setCurrent(QStandardPaths::standardLocations(QStandardPaths::DocumentsLocation)[0]);
+        QStringList documentLocations = QStandardPaths::standardLocations(QStandardPaths::DocumentsLocation);
+        QDir::setCurrent(documentLocations.first());
     }
     if (settingFilename.isEmpty()) {
         lockFile.unlock();
@@ -338,7 +315,14 @@ int main(int argc, char *argv[])
         if (transUtils.load("qt_utils_"+language,":/i18n/")) {
             app.installTranslator(&transUtils);
         }
-        if (transQt.load("qt_"+language,":/translations")) {
+        QString translationsPath(QLibraryInfo::location(QLibraryInfo::TranslationsPath));
+        if (
+            // since Qt 5.15.3, `qt_xx.qm` is a wrapper for `qtbase_xx.qm` and other (unused) `qm`s.
+            // first, try loading `qt_xx.qm` from standard location (dynamic build) so that it works on Debian 11 (with Qt 5.15.2),
+            transQt.load("qt_" + language, translationsPath) ||
+            // and then bundled `qtbase_xx.qm` (static build) for simplicity in qmake project.
+            transQt.load("qtbase_" + language, ":/translations")
+        ) {
             app.installTranslator(&transQt);
         }
     }
@@ -412,32 +396,38 @@ int main(int argc, char *argv[])
         // qDebug()<<"Load font";
         QFontDatabase::addApplicationFont(":/fonts/asciicontrol.ttf");
 
+        QDir::setCurrent(pSettings->environment().defaultOpenFolder());
+
         MainWindow mainWindow;
         pMainWindow = &mainWindow;
         if (mainWindow.screen())
             setScreenDPI(mainWindow.screen()->logicalDotsPerInch());
+
         mainWindow.show();
-        if (app.arguments().count()>1) {
-            QStringList filesToOpen = app.arguments();
-            filesToOpen.pop_front();
-            pMainWindow->openFiles(filesToOpen);
+
+        QStringList filesToOpen = app.arguments();
+        filesToOpen.pop_front();
+        if (!filesToOpen.isEmpty()) {
+            mainWindow.openFiles(filesToOpen);
         } else {
             if (pSettings->editor().autoLoadLastFiles())
-                pMainWindow->loadLastOpens();
-            if (pMainWindow->editorList()->pageCount()==0 && !pMainWindow->project()) {
-                pMainWindow->newEditor();
-            }
+                mainWindow.loadLastOpens();
+        }
+        if (mainWindow.editorList()->pageCount()==0 && !mainWindow.project()) {
+            mainWindow.newEditor();
         }
 
         //reset default open folder
-        QDir::setCurrent(pSettings->environment().defaultOpenFolder());
-
-        pMainWindow->setFilesViewRoot(pSettings->environment().currentFolder());
+        mainWindow.setFilesViewRoot(pSettings->environment().currentFolder());
 
 #ifdef Q_OS_WIN
         WindowLogoutEventFilter filter;
         app.installNativeEventFilter(&filter);
 #endif
+        //Event filter to prevent QCombobox receive wheel event;
+        BlockWheelEventFiler *blockWheelFilter=new BlockWheelEventFiler(&app);
+        app.installEventFilter(blockWheelFilter);
+
         if (lockFile.isLocked()) {
             lockFile.unlock();
         }

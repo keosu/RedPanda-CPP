@@ -25,24 +25,24 @@
 #include "cpptokenizer.h"
 #include "cpppreprocessor.h"
 
+class CppParser;
+using PCppParser = std::shared_ptr<CppParser>;
 class CppParser : public QObject
 {
     Q_OBJECT
-
 public:
-
     struct ParseFileCommand {
         QString fileName;
         bool inProject;
+        QString contextFilename;
         bool onlyIfNotParsed;
         bool updateView;
-        std::shared_ptr<CppParser> parserPtr;
     };
-
     using PParseFileCommand = std::unique_ptr<ParseFileCommand>;
-    explicit CppParser(QObject *parent = nullptr);
+
+    explicit CppParser();
     CppParser(const CppParser&)=delete;
-    CppParser& operator=(const CppParser)=delete;
+    CppParser& operator=(const CppParser&)=delete;
 
     ~CppParser();
 
@@ -56,38 +56,40 @@ public:
     void clearProjectFiles();
     QList<PStatement> getListOfFunctions(const QString& fileName,
                              const QString& phrase,
-                             int line);
-    PStatement findScopeStatement(const QString& filename, int line);
-    PParsedFileInfo findFileInfo(const QString &filename);
+                             int line) const;
+    PStatement findScopeStatement(const QString& filename, int line) const;
+    PParsedFileInfo findFileInfo(const QString &filename) const;
     QString findFirstTemplateParamOf(const QString& fileName,
                                      const QString& phrase,
-                                     const PStatement& currentScope);
+                                     const PStatement& currentScope) const;
     QString findTemplateParamOf(const QString& fileName,
                                      const QString& phrase,
                                      int index,
-                                     const PStatement& currentScope);
+                                     const PStatement& currentScope) const;
     PStatement findFunctionAt(const QString& fileName,
-                            int line);
+                            int line) const;
     int findLastOperator(const QString& phrase) const;
-    PStatementList findNamespace(const QString& name); // return a list of PSTATEMENTS (of the namespace)
-    PStatement findStatement(const QString& fullname);
+    PStatementList findNamespace(const QString& name) const; // return a list of PSTATEMENTS (of the namespace)
+    PStatement findStatement(const QString& fullname) const;
     PStatement findStatementOf(const QString& fileName,
                                const QString& phrase,
-                               int line);
+                               int line) const;
     PStatement findStatementOf(const QString& fileName,
                                const QString& phrase,
                                const PStatement& currentScope,
-                               PStatement& parentScopeType);
+                               PStatement& parentScopeType) const;
 
     PStatement findStatementOf(const QString& fileName,
                                const QStringList& expression,
-                               const PStatement& currentScope);
+                               const PStatement& currentScope) const;
     PStatement findStatementOf(const QString& fileName,
                                const QStringList& expression,
-                               int line);
-    PStatement findAliasedStatement(const PStatement& statement);
+                               int line) const;
+    PStatement findAliasedStatement(const PStatement& statement) const;
+    QStringList getFunctionParameterNames(const PStatement& statement) const;
 
-    QList<PStatement> listTypeStatements(const QString& fileName,int line);
+    QList<PStatement> listTypeStatements(const QString& fileName,int line) const;
+    QList<PStatement> listLiteralOperators(const QString& fileName,int line) const;
 
     /**
      * @brief evaluate the expression
@@ -98,40 +100,36 @@ public:
      */
     PEvalStatement evalExpression(const QString& fileName,
                                QStringList& expression,
-                               const PStatement& currentScope);
+                               const PStatement& currentScope) const;
     PStatement findTypeDefinitionOf(const QString& fileName,
                                     const QString& aType,
-                                    const PStatement& currentClass);
+                                    const PStatement& currentClass) const;
     PStatement findTypeDef(const PStatement& statement,
-                          const QString& fileName);
+                          const QString& fileName) const;
     bool freeze();  // Freeze/Lock (stop reparse while searching)
     bool freeze(const QString& serialId);  // Freeze/Lock (stop reparse while searching)
-    QStringList getClassesList();
-    QStringList getFileDirectIncludes(const QString& filename);
-    QSet<QString> getIncludedFiles(const QString& filename);
-    QSet<QString> getFileUsings(const QString& filename);
+    QStringList getClassesList() const;
+    QStringList getFileDirectIncludes(const QString& filename) const;
+    QSet<QString> getIncludedFiles(const QString& filename) const;
+    QSet<QString> getFileUsings(const QString& filename) const;
 
-    QString getHeaderFileName(const QString& relativeTo, const QString& headerName, bool fromNext=false);// both
+    QString getHeaderFileName(const QString& relativeTo, const QString& headerName, bool fromNext=false) const;
 
     void invalidateFile(const QString& fileName);
-    bool isLineVisible(const QString& fileName, int line);
-    bool isIncludeLine(const QString &line);
-    bool isIncludeNextLine(const QString &line);
-    bool isProjectHeaderFile(const QString& fileName);
-    bool isSystemHeaderFile(const QString& fileName);
-    void parseFile(const QString& fileName, bool inProject,
-                   bool onlyIfNotParsed = false, bool updateView = true,
-                   std::shared_ptr<CppParser> parserPtr = nullptr);
-    void parseFileList(bool updateView = true);
+    bool isLineVisible(const QString& fileName, int line) const;
+    bool isIncludeLine(const QString &line) const;
+    bool isIncludeNextLine(const QString &line) const;
+    bool isProjectHeaderFile(const QString& fileName) const;
+    bool isSystemHeaderFile(const QString& fileName) const;
     void parseHardDefines();
     bool parsing() const;
     void resetParser();
     void unFreeze(); // UnFree/UnLock (reparse while searching)
-    bool fileScanned(const QString& fileName);
+    bool fileScanned(const QString& fileName) const;
 
-    bool isFileParsed(const QString& filename);
+    bool isFileParsed(const QString& filename) const;
 
-    QString prettyPrintStatement(const PStatement& statement, const QString& filename, int line = -1);
+    QString prettyPrintStatement(const PStatement& statement, const QString& filename, int line = -1) const;
 
     bool enabled() const;
     void setEnabled(bool newEnabled);
@@ -163,12 +161,25 @@ public:
 
     QList<QString> namespaces();
 
+    static bool isIdentifier(const QString& token){
+        return (!token.isEmpty() && isIdentChar(token.front()));
+        // return (!token.isEmpty() && isIdentChar(token.front())
+        //         && !token.contains("\""));
+    }
+
 signals:
     void onProgress(const QString& fileName, int total, int current);
     void onBusy();
     void onStartParsing();
     void onEndParsing(int total, int updateView);
 private:
+    bool parseFile(const QString& fileName, bool inProject,
+                   const QString& contextFilename,
+                   bool onlyIfNotParsed = false, bool updateView = true
+                   );
+    void parseFileList(bool updateView = true);
+    PParseFileCommand retrievePendingParseFileCommand();
+
     PStatement addInheritedStatement(
             const PStatement& derived,
             const PStatement& inherit,
@@ -275,7 +286,7 @@ private:
     PStatement doFindAliasedStatement(const PStatement& statement) const;
     PStatement doFindNoTemplateSpecializationClass(const PStatement& statement) const;
 
-    QList<PStatement> doListTypeStatements(const QString& fileName,int line) const;
+    QList<PStatement> doListStatements(const QString& fileName,int line, const QSet<StatementKind> &kinds) const;
 
     PStatement doFindTypeDefinitionOf(const QString& fileName,
                                     const QString& aType,
@@ -410,12 +421,8 @@ private:
     void  doSkipInExpression(const QStringList& expression, int&pos, const QString& startSymbol, const QString& endSymbol) const;
 
     QString findFunctionPointerName(int startIdx);
-    bool isIdentifier(const QString& token) const {
-        return (!token.isEmpty() && isIdentChar(token.front())
-                && !token.contains('\"'));
-    }
 
-    bool isIdentifierOrPointer(const QString& term) const {
+    static bool isIdentifierOrPointer(const QString& term){
         switch(term[0].unicode()) {
         case '*':
             return true;
@@ -428,25 +435,25 @@ private:
     }
 
 
-    bool isIntegerLiteral(const QString& token) const {
+    static bool isIntegerLiteral(const QString& token){
         if (token.isEmpty())
             return false;
         QChar ch = token.front();
         return (ch>='0' && ch<='9' && !token.contains(".") && !token.contains("e"));
     }
-    bool isFloatLiteral(const QString& token) const {
+    static bool isFloatLiteral(const QString& token){
         if (token.isEmpty())
             return false;
         QChar ch = token.front();
         return (ch>='0' && ch<='9' && (token.contains(".") || token.contains("e")));
     }
-    bool isStringLiteral(const QString& token) const {
+    static bool isStringLiteral(const QString& token){
         if (token.isEmpty())
             return false;
         return (!token.startsWith('\'') && token.contains('"'));
     }
 
-    bool isCharLiteral(const QString& token) const{
+    static bool isCharLiteral(const QString& token){
         if (token.isEmpty())
             return false;
         return (token.startsWith('\''));
@@ -456,13 +463,8 @@ private:
         return mCppKeywords.contains(token);
     }
 
-    bool tokenIsIdentifier(const QString& token) const {
-        //token won't be empty
-        return isIdentChar(token[0]);
-    }
-
     bool tokenIsTypeOrNonKeyword(const QString& token) const {
-        return tokenIsIdentifier(token) &&
+        return isIdentifier(token) &&
                 (mCppTypeKeywords.contains(token)
                  || !mCppKeywords.contains(token)
                  || token=="const");
@@ -563,35 +565,34 @@ private:
 
     bool splitLastMember(const QString& token, QString& lastMember, QString& remaining);
 
-    bool isSpaceChar(const QChar& ch) const {
+    static constexpr bool isSpaceChar(const QChar& ch) {
         return ch==' ' || ch =='\t';
     }
 
-    bool isWordChar(const QChar& ch) const {
+    static constexpr  bool isWordChar(const QChar& ch){
         return ch.isLetter()
                 || ch == '_'
                 || ch == '*'
                 || ch == '&';
     }    
 
-    bool isIdentifier(const QChar& ch) const {
+    static constexpr bool isIdentifier(const QChar& ch){
         return ch.isLetter()
                 || ch == '_'
                 || ch == '~'
                 ;
     }
 
-    bool isIdentChar(const QChar& ch) const {
+    static constexpr  bool isIdentChar(const QChar& ch){
         return ch.isLetter()
                 || ch == '_';
     }
 
-    bool isDigitChar(const QChar& ch) const {
+    static constexpr bool isDigitChar(const QChar& ch){
         return (ch>='0' && ch<='9');
     }
 
-    bool isInvalidFunctionArgsSuffixChar(const QChar& ch) const {
-
+    static constexpr bool isInvalidFunctionArgsSuffixChar(const QChar& ch) {
         // &&
         switch(ch.unicode()){
         case '.':
@@ -609,7 +610,7 @@ private:
     }
 
     /*'(', ';', ':', '{', '}', '#' */
-    bool isSeperator(const QChar& ch) const {
+    static constexpr bool isSeperator(const QChar& ch){
         switch(ch.unicode()){
         case '(':
         case ';':
@@ -624,7 +625,7 @@ private:
     }
 
     /*';', '{', '}'*/
-    bool isblockChar(const QChar& ch) const {
+    static constexpr bool isblockChar(const QChar& ch){
         switch(ch.unicode()){
         case ';':
         case '{':
@@ -636,7 +637,7 @@ private:
     }
 
     /* '#', ',', ';', ':', '{', '}', '!', '/', '+', '-', '<', '>' */
-    bool isInvalidVarPrefixChar(const QChar& ch) const {
+    static constexpr bool isInvalidVarPrefixChar(const QChar& ch){
         switch (ch.unicode()) {
         case '#':
         case ',':
@@ -657,11 +658,11 @@ private:
     }
 
     /*'{', '}' */
-    bool isBraceChar(const QChar& ch) const {
+    static constexpr bool isBraceChar(const QChar& ch){
         return ch == '{' || ch =='}';
     }
 
-    bool isLineChar(const QChar& ch) const {
+    static constexpr bool isLineChar(const QChar& ch){
         return ch=='\n' || ch=='\r';
     }
 
@@ -672,7 +673,7 @@ private:
      * @param kind
      * @return
      */
-    bool isNamedScope(StatementKind kind) const;
+    static constexpr bool isNamedScope(StatementKind kind);
 
     /**
      * @brief Test if a statement is a class/struct/union/enum/enum class/typedef
@@ -742,31 +743,44 @@ private:
 #ifdef QT_DEBUG
     int mLastIndex;
 #endif
-    QRecursiveMutex mMutex;
+    mutable QRecursiveMutex mMutex;
     QMap<QString,KeywordType> mCppKeywords;
     QSet<QString> mCppTypeKeywords;
 
     PParseFileCommand mLastParseFileCommand;
+
+    friend class CppFileListParserThread;
+    friend class CppFileParserThread;
+
+    friend void parseFileBlocking(
+        PCppParser parser,
+        const QString &fileName,
+        bool inProject,
+        const QString &contextFilename,
+        bool onlyIfNotParsed,
+        bool updateView);
 };
-using PCppParser = std::shared_ptr<CppParser>;
 
 class CppFileParserThread : public QThread {
     Q_OBJECT
 public:
     explicit CppFileParserThread(
             PCppParser parser,
-            QString fileName,
+            const QString &fileName,
             bool inProject,
+            const QString &contextFilename,
             bool onlyIfNotParsed = false,
             bool updateView = true,
             QObject *parent = nullptr);
-
+    ~CppFileParserThread();
 private:
     PCppParser mParser;
     QString mFileName;
     bool mInProject;
+    QString mContextFilename;
     bool mOnlyIfNotParsed;
     bool mUpdateView;
+    int mId;
 
     // QThread interface
 protected:
@@ -789,14 +803,23 @@ protected:
     void run() override;
 };
 
-void parseFile(
+void parseFileNonBlocking(
     PCppParser parser,
-    const QString& fileName,
+    const QString &fileName,
     bool inProject,
+    const QString &contextFilename,
     bool onlyIfNotParsed = false,
     bool updateView = true);
 
-void parseFileList(
+void parseFileBlocking(
+    PCppParser parser,
+    const QString &fileName,
+    bool inProject,
+    const QString &contextFilename,
+    bool onlyIfNotParsed = false,
+    bool updateView = true);
+
+void parseFileListNonBlocking(
         PCppParser parser,
         bool updateView = true);
 

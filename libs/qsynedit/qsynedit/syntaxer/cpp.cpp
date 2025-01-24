@@ -16,6 +16,7 @@
  */
 #include "cpp.h"
 #include "../constants.h"
+#include "qt_utils/utils.h"
 
 #include <QFont>
 #include <QDebug>
@@ -408,6 +409,8 @@ void CppSyntaxer::procBraceOpen()
             popIndents(IndentType::Statement);
         }
         pushIndents(IndentType::Block, lastLine);
+    } else if (mRange.lastUnindent.type == IndentType::Parenthesis) {
+        pushIndents(IndentType::Block, mRange.lastUnindent.line);
     } else
         pushIndents(IndentType::Block);
 }
@@ -1014,8 +1017,12 @@ void CppSyntaxer::procSemiColon()
 {
     mRun += 1;
     mTokenId = TokenId::Symbol;
-    while (mRange.getLastIndentType() == IndentType::Statement) {
-        popIndents(IndentType::Statement);
+    if (mRange.getLastIndentType() == IndentType::Statement) {
+        while (mRange.getLastIndentType() == IndentType::Statement) {
+            popIndents(IndentType::Statement);
+        }
+    } else {
+        mRange.lastUnindent = IndentInfo{IndentType::None, 0};
     }
 }
 
@@ -1069,7 +1076,7 @@ void CppSyntaxer::procSpace()
 {
     mRun += 1;
     mTokenId = TokenId::Space;
-    while (mRun<mLineSize && mLine[mRun]>=1 && mLine[mRun]<=32)
+    while (mRun < mLineSize && isLexicalSpace(mLine[mRun]))
         mRun+=1;
     if (mRun>=mLineSize) {
         mRange.hasTrailingSpaces = true;
@@ -1627,6 +1634,14 @@ void CppSyntaxer::next()
                 mRun+=2;
                 mRange.state = RangeState::rsRawString;
                 procRawString();
+            } else if (mRun+2<mLineSize && (mLine[mRun] == 'L' || mLine[mRun] == 'u' || mLine[mRun]=='U')  && mLine[mRun+1] == 'R' && mLine[mRun+2]=='\"') {
+                mRun+=3;
+                mRange.state = RangeState::rsRawString;
+                procRawString();
+            } else if (mRun+3<mLineSize && mLine[mRun] == 'u' && mLine[mRun+1] == '8' && mLine[mRun+2] == 'R' && mLine[mRun+3]=='\"') {
+                mRun+=4;
+                mRange.state = RangeState::rsRawString;
+                procRawString();
             } else if (mRun+1<mLineSize && (mLine[mRun] == 'L' || mLine[mRun] == 'u' || mLine[mRun]=='U') && mLine[mRun+1]=='\"') {
                 //qDebug()<<"*d-0-0*";
                 mRun+=1;
@@ -1653,7 +1668,6 @@ void CppSyntaxer::setLine(const QString &newLine, int lineNumber)
     mRange.blockStarted = 0;
     mRange.blockEnded = 0;
     mRange.blockEndedLastLine = 0;
-    mRange.lastUnindent=IndentInfo{IndentType::None,0};
     mRange.hasTrailingSpaces = false;
     next();
 }
@@ -1670,7 +1684,7 @@ void CppSyntaxer::setState(const SyntaxState& rangeState)
     mRange.blockStarted = 0;
     mRange.blockEnded = 0;
     mRange.blockEndedLastLine = 0;
-    mRange.lastUnindent=IndentInfo{IndentType::None,0};
+    mRange.lastUnindent=rangeState.lastUnindent;
     mRange.hasTrailingSpaces = false;
 }
 

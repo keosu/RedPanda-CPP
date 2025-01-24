@@ -5,7 +5,8 @@ target("redpanda_qt_utils")
 
     add_files("qt_utils/utils.cpp")
     add_moc_classes("qt_utils/charsetinfo")
-    add_includedirs(".", {interface = true})
+    add_files("*.ts")
+    add_includedirs(".", {public = true})
 
     -- do not install
     on_install(function (target) end)

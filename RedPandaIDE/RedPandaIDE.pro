@@ -3,6 +3,10 @@ QT       += core gui printsupport network svg xml widgets
 CONFIG += c++17
 CONFIG += nokey
 
+win32: CONFIG += lrelease_dosdevice
+else: CONFIG += lrelease
+CONFIG += embed_translations
+
 # uncomment the following line to enable vcs (git) support
 # CONFIG += ENABLE_VCS
 
@@ -33,26 +37,32 @@ contains(QMAKE_HOST.arch, x86_64):{
 macos: {
     QT += gui-private
 
-    ICON = ../macos/RedPandaIDE.icns
+    ICON = ../platform/macos/RedPandaIDE.icns
 }
 
-win32: VERSION = $${APP_VERSION}.0
-else: VERSION = $${APP_VERSION}
+win32 {
+    isEmpty(TEST_VERSION) {
+        VERSION = $${APP_VERSION}.0
+    } else {
+        VERSION = $${APP_VERSION}.$${TEST_VERSION}
+    }
+} else: VERSION = $${APP_VERSION}
 
 isEmpty(PREFIX) {
     PREFIX = /usr/local
 }
 isEmpty(LIBEXECDIR) {
-    LIBEXECDIR = $${PREFIX}/libexec
+    LIBEXECDIR = libexec
 }
 
 win32: {
     DEFINES += _WIN32_WINNT=0x0501
+    LIBS += -ladvapi32  # registry APIs
     LIBS += -lpsapi  # GetModuleFileNameEx, GetProcessMemoryInfo
     LIBS += -lshlwapi  # SHDeleteKey
+    LIBS += -luser32  # window message APIs
 }
 
-DEFINES += PREFIX=\\\"$${PREFIX}\\\"
 DEFINES += LIBEXECDIR=\\\"$${LIBEXECDIR}\\\"
 DEFINES += APP_NAME=\\\"$${APP_NAME}\\\"
 
@@ -89,26 +99,18 @@ msvc {
 
 CONFIG(debug_and_release_target) {
     CONFIG(debug, debug|release) {
-        OBJ_OUT_PWD = debug/
+        OBJ_OUT_PWD = debug
     }
     CONFIG(release, debug|release) {
-        OBJ_OUT_PWD = release/
+        OBJ_OUT_PWD = release
     }
 }
 
 INCLUDEPATH += ../libs/qsynedit ../libs/redpanda_qt_utils ../libs/lua
 
-gcc | clang {
-LIBS += $$OUT_PWD/../libs/qsynedit/$${OBJ_OUT_PWD}libqsynedit.a \
-        $$OUT_PWD/../libs/redpanda_qt_utils/$${OBJ_OUT_PWD}libredpanda_qt_utils.a \
-        $$OUT_PWD/../libs/lua/$${OBJ_OUT_PWD}liblua.a
-}
-msvc {
-LIBS += $$OUT_PWD/../libs/qsynedit/$${OBJ_OUT_PWD}qsynedit.lib \
-        $$OUT_PWD/../libs/redpanda_qt_utils/$${OBJ_OUT_PWD}redpanda_qt_utils.lib \
-        $$OUT_PWD/../libs/lua/$${OBJ_OUT_PWD}lua.lib
-LIBS += advapi32.lib user32.lib
-}
+LIBS += -L$$OUT_PWD/../libs/qsynedit/$${OBJ_OUT_PWD} -lqsynedit \
+        -L$$OUT_PWD/../libs/redpanda_qt_utils/$${OBJ_OUT_PWD} -lredpanda_qt_utils \
+        -L$$OUT_PWD/../libs/lua/$${OBJ_OUT_PWD} -llua
 
 SOURCES += \
     autolinkmanager.cpp \
@@ -244,9 +246,9 @@ SOURCES += \
 
 HEADERS += \
     SimpleIni.h \
-    addon/api.h \
-    addon/executor.h \
-    addon/runtime.h \
+    addon/luaapi.h \
+    addon/luaexecutor.h \
+    addon/luaruntime.h \
     autolinkmanager.h \
     caretlist.h \
     codesnippetsmanager.h \
@@ -323,6 +325,7 @@ HEADERS += \
     editor.h \
     editorlist.h \
     iconsmanager.h \
+    main.h \
     mainwindow.h \
     settingsdialog/compilersetdirectorieswidget.h \
     settingsdialog/compilersetoptionwidget.h \
@@ -453,14 +456,14 @@ ENABLE_LUA_ADDON {
     DEFINES += ENABLE_LUA_ADDON
 
     SOURCES += \
-        addon/api.cpp \
-        addon/executor.cpp \
-        addon/runtime.cpp
+    addon/luaapi.cpp \
+    addon/luaexecutor.cpp \
+    addon/luaruntime.cpp
 
     HEADERS += \
-        addon/api.h \
-        addon/executor.h \
-        addon/runtime.h
+    addon/luaapi.h \
+    addon/luaexecutor.h \
+    addon/luaruntime.h
 }
 
 ENABLE_VCS {
@@ -528,8 +531,9 @@ linux: {
     # legacy glibc compatibility -- modern Unices have all components in `libc.so`
     LIBS += -lrt -ldl
 
-    _LINUX_STATIC_IME_PLUGIN = $$(LINUX_STATIC_IME_PLUGIN)
-    equals(_LINUX_STATIC_IME_PLUGIN, "ON") {
+    qtConfig(static) {
+        QTPLUGIN.platforms += qxcb qwayland-generic
+
         SOURCES += \
             resources/linux_static_ime_plugin.cpp
         QTPLUGIN.platforminputcontexts += \
@@ -543,14 +547,8 @@ linux: {
 TRANSLATIONS += \
     translations/RedPandaIDE_zh_CN.ts \
     translations/RedPandaIDE_zh_TW.ts \
+    translations/RedPandaIDE_ru_RU.ts \
     translations/RedPandaIDE_pt_BR.ts
-
-EXTRA_TRANSLATIONS += \
-    ../libs/redpanda_qt_utils/qt_utils_zh_CN.ts \
-    ../libs/qsynedit/qsynedit_zh_CN.ts
-
-
-#CONFIG += lrelease embed_translations
 
 win32: {
     !isEmpty(PREFIX) {
@@ -568,35 +566,9 @@ RESOURCES += \
     codes.qrc \
     defaultconfigs.qrc \
     icons.qrc \
-    projecttemplates.qrc \
-    translations.qrc
+    projecttemplates.qrc
 
 RC_ICONS = images/devcpp.ico images/associations/c.ico images/associations/cpp.ico images/associations/dev.ico images/associations/c.ico images/associations/cpp.ico images/associations/h.ico images/associations/hpp.ico
-
-# fixed lrelease.prf
-qtPrepareTool(QMAKE_LRELEASE, lrelease)
-
-isEmpty(LRELEASE_DIR): LRELEASE_DIR = .qm
-isEmpty(QM_FILES_RESOURCE_PREFIX): QM_FILES_RESOURCE_PREFIX = i18n
-
-lrelease.name = lrelease
-lrelease.input = TRANSLATIONS EXTRA_TRANSLATIONS
-lrelease.output = $$LRELEASE_DIR/${QMAKE_FILE_IN_BASE}.qm
-lrelease.commands = $$QMAKE_LRELEASE ${QMAKE_FILE_IN} $$QMAKE_LRELEASE_FLAGS -qm ${QMAKE_FILE_OUT}
-silent: lrelease.commands = @echo lrelease ${QMAKE_FILE_IN} && $$lrelease.commands
-lrelease.CONFIG = no_link target_predeps
-QMAKE_EXTRA_COMPILERS += lrelease
-
-all_translations = $$TRANSLATIONS $$EXTRA_TRANSLATIONS
-for (translation, all_translations) {
-    # mirrors $$LRELEASE_DIR/${QMAKE_FILE_IN_BASE}.qm above
-    translation = $$basename(translation)
-    QM_FILES += $$OUT_PWD/$$LRELEASE_DIR/$$replace(translation, \\..*$, .qm)
-}
-
-qmake_qm_files.files = $$QM_FILES
-qmake_qm_files.base = $$OUT_PWD/$$LRELEASE_DIR
-qmake_qm_files.prefix = $$QM_FILES_RESOURCE_PREFIX
 
 iconsets_files.files += $$files(resources/iconsets/*.svg, true)
 iconsets_files.files += $$files(resources/iconsets/*.json, true)
@@ -607,10 +579,22 @@ theme_files.files += $$files(resources/themes/*.png, false)
 
 colorscheme_files.files += $$files(resources/colorschemes/*.scheme, false)
 
-RESOURCES += qmake_qm_files
 RESOURCES += iconsets_files
 RESOURCES += theme_files
 RESOURCES += colorscheme_files
+
+qtConfig(static) {
+    qt_translation_files.files += $$[QT_INSTALL_TRANSLATIONS]/qtbase_pt_BR.qm
+    qt_translation_files.files += $$[QT_INSTALL_TRANSLATIONS]/qtbase_zh_CN.qm
+    qt_translation_files.files += $$[QT_INSTALL_TRANSLATIONS]/qtbase_zh_TW.qm
+    exists($$[QT_INSTALL_TRANSLATIONS]/qtbase_ru_RU.qm) {
+        qt_translation_files.files += $$[QT_INSTALL_TRANSLATIONS]/qtbase_ru_RU.qm
+    }
+    qt_translation_files.base = $$[QT_INSTALL_TRANSLATIONS]
+    qt_translation_files.prefix = /translations
+
+    RESOURCES += qt_translation_files
+}
 
 macos: {
     # Add needed executables into the main app bundle

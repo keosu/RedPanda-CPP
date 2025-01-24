@@ -150,7 +150,7 @@ void GDBMIDebuggerClient::run()
         readed = mProcess->readAll();
         buffer += readed;
 
-        if (readed.endsWith("\n")&& outputTerminated(buffer)) {
+        if (readed.endsWith("\n")) {
             processDebugOutput(buffer);
             buffer.clear();
             // mCmdRunning = false;
@@ -329,24 +329,21 @@ QStringList GDBMIDebuggerClient::tokenize(const QString &s) const
     return result;
 }
 
-bool GDBMIDebuggerClient::outputTerminated(const QByteArray &text) const
-{
-    QStringList lines = textToLines(QString::fromUtf8(text));
-    foreach (const QString& line,lines) {
-        if (line.trimmed() == "(gdb)")
-            return true;
-    }
-    return false;
-}
+//bool GDBMIDebuggerClient::outputTerminated(const QByteArray &text) const
+//{
+//    QStringList lines = textToLines(QString::fromUtf8(text));
+//    foreach (const QString& line,lines) {
+//        if (line.trimmed() == "(gdb)")
+//            return true;
+//    }
+//    return false;
+//}
 
 void GDBMIDebuggerClient::handleBreakpoint(const GDBMIResultParser::ParseObject& breakpoint)
 {
     QString filename;
     // gdb use system encoding for file path
-    if (debugger()->forceUTF8() || debugger()->debugInfosUsingUTF8())
-        filename = breakpoint["fullname"].utf8PathValue();
-    else
-        filename = breakpoint["fullname"].pathValue();
+    filename = breakpoint["fullname"].pathValue();
     int line = breakpoint["line"].intValue();
     int number = breakpoint["number"].intValue();
     emit breakpointInfoGetted(filename, line , number);
@@ -361,11 +358,7 @@ void GDBMIDebuggerClient::handleFrame(const GDBMIResultParser::ParseValue &frame
         if (!ok)
             mCurrentAddress=0;
         mCurrentLine = frameObj["line"].intValue();
-        if (debugger()->forceUTF8()
-                || debugger()->debugInfosUsingUTF8())
-            mCurrentFile = frameObj["fullname"].utf8PathValue();
-        else
-            mCurrentFile = frameObj["fullname"].pathValue();
+        mCurrentFile = frameObj["fullname"].pathValue();
         mCurrentFunc = frameObj["func"].value();
     }
 }
@@ -377,10 +370,7 @@ void GDBMIDebuggerClient::handleStack(const QList<GDBMIResultParser::ParseValue>
         GDBMIResultParser::ParseObject frameObject = frameValue.object();
         PTrace trace = std::make_shared<Trace>();
         trace->funcname = frameObject["func"].value();
-        if (debugger()->forceUTF8() || debugger()->debugInfosUsingUTF8())
-            trace->filename = frameObject["fullname"].utf8PathValue();
-        else
-            trace->filename = frameObject["fullname"].pathValue();
+        trace->filename = frameObject["fullname"].pathValue();
         trace->line = frameObject["line"].intValue();
         trace->level = frameObject["level"].intValue(0);
         trace->address = frameObject["addr"].value();
@@ -564,7 +554,7 @@ void GDBMIDebuggerClient::handleDisassembly(const QList<GDBMIResultParser::Parse
             bool ok;
             QString addr = obj["address"].value();
             QString inst = obj["inst"].value();
-            QString offset = obj["offset"].value();
+            //QString offset = obj["offset"].value();
             qulonglong addrVal = addr.toULongLong(&ok, 16);
             if (addrVal == mCurrentAddress) {
                 line = "=> "+addr+ " " + inst;
@@ -937,6 +927,10 @@ void GDBMIDebuggerClient::processDebugOutput(const QByteArray& debugOutput)
              break;
          case '+': // status async output
          case '=': // notify async output
+             break;
+         case '(': // Prompt (gdb)
+//             if (line.startsWith("(gdb)"))
+//                 mConsoleOutput.append(line);
              break;
          }
     }

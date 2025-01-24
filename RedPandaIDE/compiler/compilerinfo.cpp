@@ -108,12 +108,14 @@ void CompilerInfo::prepareCompilerOptions()
     sl.append(QPair<QString,QString>("ISO C++17","c++17"));
     sl.append(QPair<QString,QString>("ISO C++20","c++2a"));
     sl.append(QPair<QString,QString>("ISO C++23","c++2b"));
+    sl.append(QPair<QString,QString>("ISO C++26","c++2c"));
     sl.append(QPair<QString,QString>("GNU C++","gnu++98"));
     sl.append(QPair<QString,QString>("GNU C++11","gnu++11"));
     sl.append(QPair<QString,QString>("GNU C++14","gnu++14"));
     sl.append(QPair<QString,QString>("GNU C++17","gnu++17"));
     sl.append(QPair<QString,QString>("GNU C++20","gnu++2a"));
     sl.append(QPair<QString,QString>("GNU C++23","gnu++2b"));
+    sl.append(QPair<QString,QString>("GNU C++26","gnu++2c"));
     addOption(CC_CMD_OPT_STD, QObject::tr("C++ Language standard (-std)"), groupName, false, true, false, "-std=",CompilerOptionType::Choice, sl);
 
     sl.clear();
@@ -121,10 +123,14 @@ void CompilerInfo::prepareCompilerOptions()
     sl.append(QPair<QString,QString>("ISO C99","c99"));
     sl.append(QPair<QString,QString>("ISO C11","c11"));
     sl.append(QPair<QString,QString>("ISO C17","c17"));
+    sl.append(QPair<QString,QString>("ISO C23","c2x"));
+    sl.append(QPair<QString,QString>("ISO C2Y","c2y"));
     sl.append(QPair<QString,QString>("GNU C90","gnu90"));
     sl.append(QPair<QString,QString>("GNU C99","gnu99"));
     sl.append(QPair<QString,QString>("GNU C11","gnu11"));
     sl.append(QPair<QString,QString>("GNU C17","gnu17"));
+    sl.append(QPair<QString,QString>("GNU C23","gnu2x"));
+    sl.append(QPair<QString,QString>("GNU C2Y","gnu2y"));
     addOption(C_CMD_OPT_STD, QObject::tr("C Language standard (-std)"), groupName, true, false, false, "-std=", CompilerOptionType::Choice, sl);
 
     // Optimization for cpu type
@@ -179,13 +185,15 @@ void CompilerInfo::prepareCompilerOptions()
 
     // 32bit/64bit
     sl.clear();
-    sl.append(QPair<QString,QString>("32bit","32"));
-    sl.append(QPair<QString,QString>("64bit","64"));
-    addOption(CC_CMD_OPT_POINTER_SIZE, QObject::tr("Compile with the following pointer size (-mx)"), groupName, true, true, true, "-m", CompilerOptionType::Choice, sl);
+    sl.append(QPair<QString,QString>(QObject::tr("32-bit pointer, 32-bit instruction (-m32)"), "32"));
+    sl.append(QPair<QString,QString>(QObject::tr("32-bit pointer, 64-bit instruction (-mx32)"), "x32"));
+    sl.append(QPair<QString,QString>(QObject::tr("64-bit pointer, 64-bit instruction (-m64)"), "64"));
+    addOption(CC_CMD_OPT_POINTER_SIZE, QObject::tr("x86 multilib (-mx)"), groupName, true, true, true, "-m", CompilerOptionType::Choice, sl);
 
     addOption(CC_CMD_OPT_DEBUG_INFO, QObject::tr("Generate debugging information (-g3)"), groupName, true, true, false, "-g3");
     addOption(CC_CMD_OPT_PROFILE_INFO, QObject::tr("Generate profiling info for analysis (-pg)"), groupName, true, true, true, "-pg");
     addOption(CC_CMD_OPT_SYNTAX_ONLY, QObject::tr("Only check the code for syntax errors (-fsyntax-only)"), groupName, true, true, false, "-fsyntax-only");
+    addOption(CC_CMD_OPT_ENABLE_GCC_IMPORT_STD, QObject::tr("Enable experimental support for GCC standard library modules (-fmodules)"), groupName, false, true, false, "-fmodules");
 
     // Warnings
     groupName = QObject::tr("Warnings");
@@ -217,9 +225,7 @@ void CompilerInfo::prepareCompilerOptions()
 
     // Linker
     groupName = QObject::tr("Linker");
-#ifdef Q_OS_WIN
-    addNumberOption(LINK_CMD_OPT_STACK_SIZE, QObject::tr("Stack Size"), groupName, false, false, true, "-Wl,--stack,","MB",1024*1024,12,0,99999);
-#endif
+    addNumberOption(LINK_CMD_OPT_STACK_SIZE, QObject::tr("PE Stack Size"), groupName, false, false, true, "-Wl,--stack,","MB",1024*1024,0,0,99999);
 
     addOption(CC_CMD_OPT_USE_PIPE, QObject::tr("Use pipes instead of temporary files during compilation (-pipe)"), groupName, true, true, false, "-pipe");
     //addOption(LINK_CMD_OPT_LINK_OBJC, QObject::tr("Link an Objective C program (-lobjc)"), groupName, false, false, true, "-lobjc");
@@ -278,14 +284,6 @@ QList<PCompilerOption> CompilerInfoManager::getCompilerOptions(CompilerType comp
     return pInfo->compilerOptions();
 }
 
-bool CompilerInfoManager::supportCovertingCharset(CompilerType compilerType)
-{
-    PCompilerInfo pInfo = getInfo(compilerType);
-    if (!pInfo)
-        return false;
-    return pInfo->supportConvertingCharset();
-}
-
 bool CompilerInfoManager::supportStaticLink(CompilerType compilerType)
 {
     PCompilerInfo pInfo = getInfo(compilerType);
@@ -329,11 +327,6 @@ ClangCompilerInfo::ClangCompilerInfo():CompilerInfo(COMPILER_CLANG)
 {
 }
 
-bool ClangCompilerInfo::supportConvertingCharset()
-{
-    return false;
-}
-
 bool ClangCompilerInfo::forceUTF8InDebugger()
 {
     return true;
@@ -351,11 +344,6 @@ bool ClangCompilerInfo::supportStaticLink()
 
 GCCCompilerInfo::GCCCompilerInfo():CompilerInfo(COMPILER_GCC)
 {
-}
-
-bool GCCCompilerInfo::supportConvertingCharset()
-{
-    return true;
 }
 
 bool GCCCompilerInfo::forceUTF8InDebugger()
@@ -377,11 +365,6 @@ GCCUTF8CompilerInfo::GCCUTF8CompilerInfo():CompilerInfo(COMPILER_GCC_UTF8)
 {
 }
 
-bool GCCUTF8CompilerInfo::supportConvertingCharset()
-{
-    return true;
-}
-
 bool GCCUTF8CompilerInfo::forceUTF8InDebugger()
 {
     return true;
@@ -401,11 +384,6 @@ bool GCCUTF8CompilerInfo::supportStaticLink()
 SDCCCompilerInfo::SDCCCompilerInfo():CompilerInfo(COMPILER_SDCC)
 {
 
-}
-
-bool SDCCCompilerInfo::supportConvertingCharset()
-{
-    return false;
 }
 
 bool SDCCCompilerInfo::forceUTF8InDebugger()

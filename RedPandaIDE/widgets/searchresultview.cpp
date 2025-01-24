@@ -388,7 +388,7 @@ QVariant SearchResultListModel::data(const QModelIndex &index, int role) const
             case SearchFileScope::openedFiles:
                 return tr("Open Files:") + QString(" \"%1\"").arg(results->keyword);
             case SearchFileScope::Folder:
-                return tr("\"%1\" in Folder \"%2\"").arg(results->keyword).arg(results->folder);
+                return tr("\"%1\" in Folder \"%2\"").arg(results->keyword,results->folder);
             }
         } else if (results->searchType == SearchType::FindOccurences) {
             if (results->scope == SearchFileScope::currentFile) {
@@ -413,7 +413,7 @@ void SearchResultListModel::onResultModelChanged()
  *
  * see https://stackoverflow.com/questions/1956542/how-to-make-item-view-render-rich-html-text-in-qt/66412883#66412883
  */
-SearchResultTreeViewDelegate::SearchResultTreeViewDelegate(PSearchResultTreeModel model, QObject *parent):
+SearchResultTreeViewDelegate::SearchResultTreeViewDelegate(SearchResultTreeModel *model, QObject *parent):
     QStyledItemDelegate(parent),
     mModel(model)
 {

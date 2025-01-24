@@ -16,8 +16,8 @@
  */
 #include "settings.h"
 #include <QApplication>
-#include <QTextCodec>
 #include <algorithm>
+#include "compiler/compilerinfo.h"
 #include "utils.h"
 #include "utils/escape.h"
 #include "utils/font.h"
@@ -36,8 +36,8 @@
 #include <sys/sysinfo.h>
 #endif
 #ifdef ENABLE_LUA_ADDON
-# include "addon/executor.h"
-# include "addon/runtime.h"
+# include "addon/luaexecutor.h"
+# include "addon/luaruntime.h"
 #endif
 
 const char ValueToChar[28] = {'0', '1', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h',
@@ -230,10 +230,8 @@ QString Settings::Dirs::appLibexecDir() const
 #elif defined(Q_OS_MACOS)
     return QApplication::instance()->applicationDirPath();
 #else // XDG desktop
-    // in AppImage or tarball LIBEXECDIR is not true, resolve from relative path
-    const static QString relativeLibExecDir(QDir(PREFIX "/bin").relativeFilePath(LIBEXECDIR "/" APP_NAME));
-    const static QString absoluteLibExecDir(QDir(appDir()).absoluteFilePath(relativeLibExecDir));
-    return absoluteLibExecDir;
+    const static QString libExecDir(QDir(appDir()).absoluteFilePath("../" LIBEXECDIR "/" APP_NAME));
+    return libExecDir;
 #endif
 }
 
@@ -245,7 +243,7 @@ QString Settings::Dirs::projectDir() const
 QString Settings::Dirs::data(Settings::Dirs::DataType dataType) const
 {
     using DataType = Settings::Dirs::DataType;
-    QString dataDir = includeTrailingPathDelimiter(appDir())+"data";
+    QString dataDir = getFilePath(appDir(), +"data");
     switch (dataType) {
     case DataType::None:
         return dataDir;
@@ -256,7 +254,7 @@ QString Settings::Dirs::data(Settings::Dirs::DataType dataType) const
     case DataType::Theme:
         return ":/resources/themes";
     case DataType::Template:
-        return includeTrailingPathDelimiter(appResourceDir()) + "templates";
+        return getFilePath(appResourceDir(),"templates");
     }
     return "";
 }
@@ -270,13 +268,13 @@ QString Settings::Dirs::config(Settings::Dirs::DataType dataType) const
     case DataType::None:
         return configDir;
     case DataType::ColorScheme:
-        return QFileInfo{includeTrailingPathDelimiter(configDir)+"scheme"}.absoluteFilePath();
+        return getAbsoluteFilePath(configDir, "scheme");
     case DataType::IconSet:
-        return QFileInfo{includeTrailingPathDelimiter(configDir)+"iconsets"}.absoluteFilePath();
+        return getAbsoluteFilePath(configDir, "iconsets");
     case DataType::Theme:
-        return QFileInfo{includeTrailingPathDelimiter(configDir)+"themes"}.absoluteFilePath();
+        return getAbsoluteFilePath(configDir, "themes");
     case DataType::Template:
-        return QFileInfo{includeTrailingPathDelimiter(configDir) + "templates"}.absoluteFilePath();
+        return getAbsoluteFilePath(configDir, "templates");
     }
     return "";
 }
@@ -297,10 +295,12 @@ void Settings::Dirs::doLoad()
 {
     QString defaultProjectDir;
     if (isGreenEdition()) {
-        defaultProjectDir = includeTrailingPathDelimiter(appDir()) + "projects";
+        defaultProjectDir = getFilePath(appDir(), "projects");
     } else {
-        defaultProjectDir = includeTrailingPathDelimiter(QStandardPaths::standardLocations(QStandardPaths::DocumentsLocation)[0])
-                         + "projects";
+        QStringList docLocations = QStandardPaths::standardLocations(QStandardPaths::DocumentsLocation);
+        defaultProjectDir = getFilePath(
+                                docLocations.first(),
+                                "projects");
     }
     mProjectDir = stringValue("projectDir",defaultProjectDir);
 }
@@ -631,12 +631,12 @@ void Settings::Editor::setShowFunctionTips(bool newShowFunctionTips)
 
 bool Settings::Editor::fillIndents() const
 {
-    return mfillIndents;
+    return mFillIndents;
 }
 
 void Settings::Editor::setFillIndents(bool newFillIndents)
 {
-    mfillIndents = newFillIndents;
+    mFillIndents = newFillIndents;
 }
 
 int Settings::Editor::mouseWheelScrollSpeed() const
@@ -802,6 +802,46 @@ bool Settings::Editor::forceFixedFontWidth() const
 void Settings::Editor::setForceFixedFontWidth(bool newForceFixedWidth)
 {
     mForceFixedFontWidth = newForceFixedWidth;
+}
+
+bool Settings::Editor::copyHTMLRecalcLineNumber() const
+{
+    return mCopyHTMLRecalcLineNumber;
+}
+
+void Settings::Editor::setCopyHTMLRecalcLineNumber(bool newCopyHTMLRecalcLineNumber)
+{
+    mCopyHTMLRecalcLineNumber = newCopyHTMLRecalcLineNumber;
+}
+
+bool Settings::Editor::rainbowIndents() const
+{
+    return mRainbowIndents;
+}
+
+void Settings::Editor::setRainbowIndents(bool newFillIndentsUsingRainbowColor)
+{
+    mRainbowIndents = newFillIndentsUsingRainbowColor;
+}
+
+bool Settings::Editor::rainbowIndentGuides() const
+{
+    return mRainbowIndentGuides;
+}
+
+void Settings::Editor::setRainbowIndentGuides(bool newIndentLineUsingRainbowColor)
+{
+    mRainbowIndentGuides = newIndentLineUsingRainbowColor;
+}
+
+bool Settings::Editor::copyHTMLWithLineNumber() const
+{
+    return mCopyHTMLWithLineNumber;
+}
+
+void Settings::Editor::setCopyHTMLWithLineNumber(bool newCopyHTMLWithLineNumber)
+{
+    mCopyHTMLWithLineNumber = newCopyHTMLWithLineNumber;
 }
 
 bool Settings::Editor::showTrailingSpaces() const
@@ -1257,8 +1297,10 @@ void Settings::Editor::doSave()
     saveValue("tab_to_spaces", mTabToSpaces);
     saveValue("tab_width", mTabWidth);
     saveValue("show_indent_lines", mShowIndentLines);
-    saveValue("indent_line_color",mIndentLineColor);
-    saveValue("fill_indents",mfillIndents);
+    saveValue("fill_indents",mFillIndents);
+    saveValue("rainbow_indent_guides",mRainbowIndentGuides);
+    saveValue("rainbow_indents",mRainbowIndents);
+
 
     // caret
     saveValue("enhance_home_key",mEnhanceHomeKey);
@@ -1320,6 +1362,9 @@ void Settings::Editor::doSave()
     saveValue("copy_rtf_color_scheme",mCopyRTFColorScheme);
     saveValue("copy_html_use_background",mCopyHTMLUseBackground);
     saveValue("copy_html_use_editor_color_scheme",mCopyHTMLUseEditorColor);
+    saveValue("copy_html_with_line_number",mCopyHTMLWithLineNumber);
+    saveValue("copy_html_recalc_line_number",mCopyHTMLRecalcLineNumber);
+
     saveValue("copy_html_color_scheme", mCopyHTMLColorScheme);
 
     //color scheme
@@ -1384,8 +1429,10 @@ void Settings::Editor::doLoad()
     mTabToSpaces = boolValue("tab_to_spaces",false);
     mTabWidth = intValue("tab_width",4);
     mShowIndentLines = boolValue("show_indent_lines",true);
-    mIndentLineColor = colorValue("indent_line_color",Qt::lightGray);
-    mfillIndents = boolValue("fill_indents", false);
+    mFillIndents = boolValue("fill_indents", false);
+    mRainbowIndentGuides = boolValue("rainbow_indent_guides", true);
+    mRainbowIndents = boolValue("rainbow_indents", true);
+
     // caret
     mEnhanceHomeKey = boolValue("enhance_home_key", true);
     mEnhanceEndKey = boolValue("enhance_end_key",true);
@@ -1472,6 +1519,9 @@ void Settings::Editor::doLoad()
     mCopyRTFColorScheme = stringValue("copy_rtf_color_scheme","Intellij Classic");
     mCopyHTMLUseBackground = boolValue("copy_html_use_background",false);
     mCopyHTMLUseEditorColor = boolValue("copy_html_use_editor_color_scheme",false);
+    mCopyHTMLWithLineNumber = boolValue("copy_html_with_line_number", false);
+    mCopyHTMLRecalcLineNumber = boolValue("copy_html_recalc_line_number", true);
+
     mCopyHTMLColorScheme = stringValue("copy_html_color_scheme","Intellij Classic");
 
     //color
@@ -1574,16 +1624,6 @@ void Settings::Editor::setEnhanceHomeKey(bool enhanceHomeKey)
     mEnhanceHomeKey = enhanceHomeKey;
 }
 
-QColor Settings::Editor::indentLineColor() const
-{
-    return mIndentLineColor;
-}
-
-void Settings::Editor::setIndentLineColor(const QColor &indentLineColor)
-{
-    mIndentLineColor = indentLineColor;
-}
-
 bool Settings::Editor::showIndentLines() const
 {
     return mShowIndentLines;
@@ -1626,7 +1666,13 @@ Settings::CompilerSet::CompilerSet():
     mCompilationProperSuffix{DEFAULT_COMPILATION_SUFFIX},
     mAssemblingSuffix{DEFAULT_ASSEMBLING_SUFFIX},
     mExecutableSuffix{DEFAULT_EXECUTABLE_SUFFIX},
-    mCompilationStage{Settings::CompilerSet::CompilationStage::GenerateExecutable}
+    mCompilationStage{Settings::CompilerSet::CompilationStage::GenerateExecutable},
+    mGccSupportNLS{false},
+    mGccSupportNLSInitialized{false}
+#ifdef Q_OS_WINDOWS
+    , mGccIsUtf8Initialized{false}
+    , mGccSupportConvertingCharsetInitialized{false}
+#endif
 {
 
 }
@@ -1642,7 +1688,13 @@ Settings::CompilerSet::CompilerSet(const QString& compilerFolder, const QString&
     mCompilationProperSuffix{DEFAULT_COMPILATION_SUFFIX},
     mAssemblingSuffix{DEFAULT_ASSEMBLING_SUFFIX},
     mExecutableSuffix{DEFAULT_EXECUTABLE_SUFFIX},
-    mCompilationStage{Settings::CompilerSet::CompilationStage::GenerateExecutable}
+    mCompilationStage{Settings::CompilerSet::CompilationStage::GenerateExecutable},
+    mGccSupportNLS{false},
+    mGccSupportNLSInitialized{false}
+#ifdef Q_OS_WINDOWS
+    , mGccIsUtf8Initialized(false)
+    , mGccSupportConvertingCharsetInitialized(false)
+#endif
 {
     QDir dir(compilerFolder);
     if (dir.exists(c_prog)) {
@@ -1691,7 +1743,6 @@ Settings::CompilerSet::CompilerSet(const Settings::CompilerSet &set):
 
     mDumpMachine{set.mDumpMachine},
     mVersion{set.mVersion},
-    mType{set.mType},
     mName{set.mName},
     mTarget{set.mTarget},
     mCompilerType{set.mCompilerType},
@@ -1712,7 +1763,15 @@ Settings::CompilerSet::CompilerSet(const Settings::CompilerSet &set):
     mAssemblingSuffix{set.mAssemblingSuffix},
     mExecutableSuffix{set.mExecutableSuffix},
     mCompilationStage{set.mCompilationStage},
-    mCompileOptions{set.mCompileOptions}
+    mCompileOptions{set.mCompileOptions},
+    mGccSupportNLS{set.mGccSupportNLS},
+    mGccSupportNLSInitialized{set.mGccSupportNLSInitialized}
+#ifdef Q_OS_WINDOWS
+    , mGccIsUtf8(set.mGccIsUtf8)
+    , mGccIsUtf8Initialized(set.mGccIsUtf8Initialized)
+    , mGccSupportConvertingCharset(set.mGccSupportConvertingCharset)
+    , mGccSupportConvertingCharsetInitialized(set.mGccSupportConvertingCharsetInitialized)
+#endif
 {
 
 }
@@ -1736,7 +1795,6 @@ Settings::CompilerSet::CompilerSet(const QJsonObject &set) :
 
     mDumpMachine{set["dumpMachine"].toString()},
     mVersion{set["version"].toString()},
-    mType{set["type"].toString()},
     mName{set["name"].toString()},
     mTarget{set["target"].toString()},
     mCompilerType{}, // handle later
@@ -1756,21 +1814,27 @@ Settings::CompilerSet::CompilerSet(const QJsonObject &set) :
     mAssemblingSuffix{set["assemblingSuffix"].toString()},
     mExecutableSuffix{set["executableSuffix"].toString()},
     mCompilationStage{CompilationStage(set["compilationStage"].toInt())},
-    mCompileOptions{} // handle later
+    mCompileOptions{}, // handle later
+    mGccSupportNLS{false},
+    mGccSupportNLSInitialized{false}
+#ifdef Q_OS_WINDOWS
+    , mGccIsUtf8Initialized(false)
+    , mGccSupportConvertingCharsetInitialized(false)
+#endif
 {
-    for (const QJsonValue &dir : set["binDirs"].toArray())
+    foreach (const QJsonValue &dir, set["binDirs"].toArray())
         mBinDirs.append(dir.toString());
-    for (const QJsonValue &dir : set["cIncludeDirs"].toArray())
+    foreach (const QJsonValue &dir, set["cIncludeDirs"].toArray())
         mCIncludeDirs.append(dir.toString());
-    for (const QJsonValue &dir : set["cxxIncludeDirs"].toArray())
+    foreach (const QJsonValue &dir, set["cxxIncludeDirs"].toArray())
         mCppIncludeDirs.append(dir.toString());
-    for (const QJsonValue &dir : set["libDirs"].toArray())
+    foreach (const QJsonValue &dir, set["libDirs"].toArray())
         mLibDirs.append(dir.toString());
-    for (const QJsonValue &dir : set["defaultLibDirs"].toArray())
+    foreach (const QJsonValue &dir, set["defaultLibDirs"].toArray())
         mDefaultLibDirs.append(dir.toString());
-    for (const QJsonValue &dir : set["defaultCIncludeDirs"].toArray())
+    foreach (const QJsonValue &dir, set["defaultCIncludeDirs"].toArray())
         mDefaultCIncludeDirs.append(dir.toString());
-    for (const QJsonValue &dir : set["defaultCxxIncludeDirs"].toArray())
+    foreach (const QJsonValue &dir, set["defaultCxxIncludeDirs"].toArray())
         mDefaultCppIncludeDirs.append(dir.toString());
 
     QString compilerType = set["compilerType"].toString();
@@ -1792,11 +1856,11 @@ Settings::CompilerSet::CompilerSet(const QJsonObject &set) :
     }
 
     QStringList compileParams;
-    for (const QJsonValue &param : set["customCompileParams"].toArray())
+    foreach (const QJsonValue &param, set["customCompileParams"].toArray())
         compileParams << param.toString();
     mCustomCompileParams = escapeArgumentsForInputField(compileParams);
     QStringList linkParams;
-    for (const QJsonValue &param : set["customLinkParams"].toArray())
+    foreach (const QJsonValue &param, set["customLinkParams"].toArray())
         linkParams << param.toString();
     mCustomLinkParams = escapeArgumentsForInputField(linkParams);
 
@@ -1816,6 +1880,7 @@ Settings::CompilerSet::CompilerSet(const QJsonObject &set) :
                                                      {CC_CMD_OPT_DEBUG_INFO, "ccCmdOptDebugInfo"},
                                                      {CC_CMD_OPT_PROFILE_INFO, "ccCmdOptProfileInfo"},
                                                      {CC_CMD_OPT_SYNTAX_ONLY, "ccCmdOptSyntaxOnly"},
+                                                     {CC_CMD_OPT_ENABLE_GCC_IMPORT_STD, "ccCmdOptEnableGccImportStd"},
 
                                                      {CC_CMD_OPT_INHIBIT_ALL_WARNING, "ccCmdOptInhibitAllWarning"},
                                                      {CC_CMD_OPT_WARNING_ALL, "ccCmdOptWarningAll"},
@@ -1831,7 +1896,7 @@ Settings::CompilerSet::CompilerSet(const QJsonObject &set) :
                                                      {LINK_CMD_OPT_NO_CONSOLE, "linkCmdOptNoConsole"},
                                                      {LINK_CMD_OPT_STRIP_EXE, "linkCmdOptStripExe"},
                                                      };
-    for (const QString &key : optionMap.keys()) {
+    foreach (const QString &key, optionMap.keys()) {
         const QString &jsonKey = optionMap[key];
         QString value = set[jsonKey].toString();
         if (!value.isEmpty())
@@ -2016,6 +2081,9 @@ const QString &Settings::CompilerSet::CCompiler() const
 void Settings::CompilerSet::setCCompiler(const QString &name)
 {
     if (mCCompiler!=name) {
+#ifdef Q_OS_WIN
+        mGccIsUtf8Initialized = false;
+#endif
         mCCompiler = name;
         if (mCompilerType == CompilerType::Unknown) {
             QString temp=extractFileName(mCCompiler);
@@ -2135,16 +2203,6 @@ void Settings::CompilerSet::setVersion(const QString &value)
     mVersion = value;
 }
 
-const QString &Settings::CompilerSet::type() const
-{
-    return mType;
-}
-
-void Settings::CompilerSet::setType(const QString& value)
-{
-    mType = value;
-}
-
 const QString &Settings::CompilerSet::name() const
 {
     return mName;
@@ -2255,124 +2313,93 @@ void Settings::CompilerSet::setGCCProperties(const QString& binDir, const QStrin
     // We have tested before the call
 //    if (!fileExists(c_prog))
 //        return;
-    // Obtain version number and compiler distro etc
-    QStringList arguments;
-    arguments.append("-v");
-    QByteArray output = getCompilerOutput(binDir, c_prog,arguments);
 
-    //Target
-    QByteArray targetStr = "Target: ";
-    int delimPos1 = output.indexOf(targetStr);
-    if (delimPos1<0)
-        return; // unknown binary
-    delimPos1+=strlen(targetStr);
-    int delimPos2 = delimPos1;
-    while (delimPos2<output.length() && !isNonPrintableAsciiChar(output[delimPos2]))
-        delimPos2++;
-    QString triplet = output.mid(delimPos1,delimPos2-delimPos1);
+    // Obtain basic info
+    QByteArray dumpMachine = getCompilerOutput(binDir, c_prog, {"-dumpmachine"});
+    mDumpMachine = QString(dumpMachine).trimmed();
+    if (mDumpMachine.isEmpty())
+        // unknown binary
+        return;
+    if (mDumpMachine == "mingw32") {
+        // MinGW.org uses bare `mingw32` “triplet”, not conforming to GCC's document.
+        // here we change it to MinGW-w64’s compatibility mode triplet.
+        // ref 1. https://gcc.gnu.org/install/specific.html
+        // ref 2. https://sourceforge.net/p/mingw-w64/wiki2/Feature%20list/
+        mDumpMachine = "i386-pc-mingw32";
+    }
+    mTarget = mDumpMachine.mid(0, mDumpMachine.indexOf('-'));
+    QByteArray version = getCompilerOutput(binDir, c_prog, {"-dumpversion"}).trimmed();
+    // QRegularExpression versionPattern = QRegularExpression("^[\\d]+\\.[\\d]+.*$");
+    // if (auto m = versionPattern.match(version); !m.hasMatch()) {
+    //     version = getCompilerOutput(binDir, c_prog, {"-dumpfullversion"}).trimmed();
+    // }
+    mVersion = QString(version).trimmed();
 
-    int tripletDelimPos1 = triplet.indexOf('-');
-    mTarget = triplet.mid(0, tripletDelimPos1);
-
-    //Find version number
-    targetStr = "clang version ";
-    delimPos1 = output.indexOf(targetStr);
-    if (delimPos1>=0) {
+    // Obtain compiler distro
+    bool outputFormatIsPe = false;
+    QByteArray verboseOut = getCompilerOutput(binDir, c_prog, {"-v"});
+    QByteArray targetStr = "clang version ";
+    int clangVersionPos = verboseOut.indexOf(targetStr);
+    if (clangVersionPos >= 0) {
         mCompilerType = CompilerType::Clang;
-        delimPos1+=strlen(targetStr);
-        delimPos2 = delimPos1;
-        while (delimPos2<output.length() && !isNonPrintableAsciiChar(output[delimPos2]))
-            delimPos2++;
-        mVersion = output.mid(delimPos1,delimPos2-delimPos1);
-
-        mName = "Clang " + mVersion;
+        QRegularExpression ntPosixPattern = QRegularExpression("^(.*)-pc-windows-msys$");
+        QRegularExpression mingwW64Pattern = QRegularExpression("^(.*)-w64-windows-gnu$");
+        if (auto m = ntPosixPattern.match(mDumpMachine); m.hasMatch()) {
+            outputFormatIsPe = true;
+            if (mName.isEmpty())
+                mName = "MSYS2 Clang " + mVersion;
+        } else if (m = mingwW64Pattern.match(mDumpMachine); m.hasMatch()) {
+            outputFormatIsPe = true;
+            if (mName.isEmpty())
+                mName = "MinGW-w64 Clang " + mVersion;
+        } else {
+            if (mName.isEmpty())
+                mName = "Clang " + mVersion;
+        }
     } else {
         mCompilerType = CompilerType::GCC;
-        targetStr = "gcc version ";
-        delimPos1 = output.indexOf(targetStr);
-        if (delimPos1<0)
-            return; // unknown binary
-        delimPos1+=strlen(targetStr);
-        delimPos2 = delimPos1;
-        while (delimPos2<output.length() && !isNonPrintableAsciiChar(output[delimPos2]))
-            delimPos2++;
-        mVersion = output.mid(delimPos1,delimPos2-delimPos1);
-
-        int majorVersion;
-        if (mVersion.indexOf('.')>0) {
-            bool ok;
-            majorVersion=mVersion.left(mVersion.indexOf('.')).toInt(&ok);
-            if (!ok)
-                majorVersion=-1;
-        } else {
-            bool ok;
-            majorVersion=mVersion.toInt(&ok);
-            if (!ok)
-                majorVersion=-1;
-        }
-//        //fix for mingw64 gcc
-//        double versionValue;
-//        bool ok;
-//        versionValue = mVersion.toDouble(&ok);
-//        if (ok && versionValue>=12) {
-//            mCompilerType=COMPILER_GCC_UTF8;
-//        }
-
-        // Find compiler builder
-        delimPos1 = delimPos2;
-        while ((delimPos1 < output.length()) && !(output[delimPos1] == '('))
-            delimPos1++;
-        while ((delimPos2 < output.length()) && !(output[delimPos2] == ')'))
-            delimPos2++;
-        mType = output.mid(delimPos1 + 1, delimPos2 - delimPos1 - 1);
-
-        if (majorVersion>=12 && mType.contains("MSYS2"))
+        QRegularExpression ntPosixPattern = QRegularExpression("^(.*)-(.*)-(msys|cygwin)$");
+        QRegularExpression mingwW64Pattern = QRegularExpression("^(.*)-w64-mingw32$");
+        QRegularExpression mingwOrgPattern("^(.*)-(.*)-mingw32$");
+        if (auto m = ntPosixPattern.match(mDumpMachine); m.hasMatch()) {
             mCompilerType = CompilerType::GCC_UTF8;
-        // Assemble user friendly name if we don't have one yet
-        if (mName == "") {
-            if (mType.contains("tdm64",Qt::CaseInsensitive)) {
-                mName = "TDM-GCC " + mVersion;
-            } else if (mType.contains("tdm",Qt::CaseInsensitive)) {
-                mName = "TDM-GCC " + mVersion;
-            } else if (mType.contains("MSYS2",Qt::CaseInsensitive)) {
-                mName = "MinGW-w64 GCC " + mVersion;
-            } else if (mType.contains("MinGW-W64",Qt::CaseInsensitive)) {
-                mName = "MinGW-w64 GCC " + mVersion;
-            } else if (mType.contains("GCC",Qt::CaseInsensitive)) {
-#ifdef Q_OS_WIN
-                mName = "MinGW GCC " + mVersion;
-#else
-                mName = "GCC " + mVersion;
-#endif
-            } else {
-#ifdef Q_OS_WIN
-                mName = "MinGW-w64 GCC " + mVersion;
-#else
-                mName = "GCC " + mVersion;
-#endif
+            outputFormatIsPe = true;
+            if (mName.isEmpty()) {
+                if (m.captured(3) == "msys")
+                    mName = "MSYS2 GCC " + mVersion;
+                else
+                    mName = "Cygwin GCC " + mVersion;
             }
+        } else if (m = mingwW64Pattern.match(mDumpMachine); m.hasMatch()) {
+            outputFormatIsPe = true;
+            if (mName.isEmpty())
+                mName = "MinGW-w64 GCC " + mVersion;
+        } else if (m = mingwOrgPattern.match(mDumpMachine); m.hasMatch()) {
+            outputFormatIsPe = true;
+            if (mName.isEmpty())
+                mName = "MinGW.org GCC " + mVersion;
+        } else {
+            if (mName.isEmpty())
+                mName = "GCC " + mVersion;
         }
     }
+    if (outputFormatIsPe)
+        setCompileOption(LINK_CMD_OPT_STACK_SIZE, "12");
 
     // Set compiler folder
     QDir tmpDir(binDir);
     tmpDir.cdUp();
     QString folder = tmpDir.path();
 
-    // Obtain compiler target
-    arguments.clear();
-    arguments.append("-dumpmachine");
-    mDumpMachine = getCompilerOutput(binDir, c_prog, arguments);
-
     // Add the default directories
-    addExistingDirectory(mBinDirs, includeTrailingPathDelimiter(folder) +  "bin");
-    if (!mDumpMachine.isEmpty()) {
-        //mingw-w64 bin folder
-        addExistingDirectory(mBinDirs,
-            includeTrailingPathDelimiter(folder) + "lib/"
-            "gcc/" + mDumpMachine
-            + "/" + mVersion);
-    }
+    addExistingDirectory(mBinDirs, getFilePath(folder,"bin"));
+    // if (!mDumpMachine.isEmpty()) {
+    //     //mingw-w64 bin folder
+    //     addExistingDirectory(mBinDirs,
+    //                         generateSubfolderPath(
+    //                             folder,
+    //                                 {"lib" , "gcc" , mDumpMachine, mVersion} ));
+    // }
 }
 
 #ifdef ENABLE_SDCC
@@ -2408,6 +2435,50 @@ void Settings::CompilerSet::setSDCCProperties(const QString& binDir, const QStri
     addExistingDirectory(mBinDirs, binDir);
 }
 #endif
+
+QStringList Settings::CompilerSet::x86MultilibList(const QString &folder, const QString &c_prog) const
+{
+    QByteArray multilibOutput = getCompilerOutput(folder, c_prog, {"-print-multi-lib"});
+    QStringList result;
+    foreach (const QByteArray& rawLine, multilibOutput.split('\n')) {
+        // man gcc:
+        //   -print-multi-lib
+        //     Print the mapping from multilib directory names to compiler switches that enable them.
+        //     The directory name is separated from the switches by `;`, and each switch starts with
+        //     an `@` instead of the `-`, without spaces between multiple switches.
+
+        // Example 1 (GCC):
+        //   .;
+        //   32;@m32
+
+        // Example 2 (GCC Debian):
+        //   .;
+        //   32;@m32
+        //   x32;@mx32
+
+        // Example 3 (Clang):
+        //   .;@m64
+        //   32;@m32
+
+        QString line = QString(rawLine).trimmed();
+        int sep = line.indexOf(';');
+        if (sep < 0)
+            continue;
+        QString dir = line.left(sep);
+        if (dir == ".")
+            // native ABI
+            continue;
+        QString switches = line.mid(sep+1);
+        if (switches == "@m32")
+            result.append("32");
+        else if (switches == "@mx32")
+            result.append("x32");
+        else if (switches == "@m64")
+            // possible for Debian x32 port
+            result.append("64");
+    }
+    return result;
+}
 
 QStringList Settings::CompilerSet::defines(bool isCpp) {
     // get default defines
@@ -2448,6 +2519,10 @@ QStringList Settings::CompilerSet::defines(bool isCpp) {
         if (pOption) {
             if (!mCompileOptions[key].isEmpty())
                 arguments.append(pOption->setting + mCompileOptions[key]);
+        }
+        pOption = CompilerInfoManager::getCompilerOption(compilerType(), CC_CMD_OPT_ENABLE_GCC_IMPORT_STD);
+        if (pOption && mCompileOptions.contains(CC_CMD_OPT_ENABLE_GCC_IMPORT_STD)) {
+            arguments.append(pOption->setting);
         }
         pOption = CompilerInfoManager::getCompilerOption(compilerType(), CC_CMD_OPT_DEBUG_INFO);
         if (pOption && mCompileOptions.contains(CC_CMD_OPT_DEBUG_INFO)) {
@@ -2558,7 +2633,6 @@ void Settings::CompilerSet::setDirectories(const QString& binDir)
 
 void Settings::CompilerSet::setGCCDirectories(const QString& binDir)
 {
-    QString folder = QFileInfo(binDir).absolutePath();
     QString c_prog;
     if (mCompilerType==CompilerType::Clang)
         c_prog = CLANG_PROGRAM;
@@ -2645,63 +2719,11 @@ void Settings::CompilerSet::setGCCDirectories(const QString& binDir)
                 addExistingDirectory(mDefaultLibDirs,trimmedLine);
         }
     }
-
-    // Try to obtain our target/autoconf folder
-    if (!mDumpMachine.isEmpty()) {
-        //mingw-w64 bin folder
-        addExistingDirectory(mBinDirs,
-            includeTrailingPathDelimiter(folder) + "lib/"
-            "gcc/" + mDumpMachine
-            + "/" + mVersion);
-
-        // Regular include folder
-        addExistingDirectory(mDefaultCIncludeDirs, includeTrailingPathDelimiter(folder) + mDumpMachine + "/include");
-        addExistingDirectory(mDefaultCppIncludeDirs, includeTrailingPathDelimiter(folder)+ mDumpMachine + "/include");
-
-        // Other include folder?
-        addExistingDirectory(mDefaultCIncludeDirs,
-            includeTrailingPathDelimiter(folder) + "lib/gcc/"
-            + mDumpMachine + "/" + mVersion + "/include");
-        addExistingDirectory(mDefaultCppIncludeDirs,
-            includeTrailingPathDelimiter(folder) + "lib/gcc/"
-            + mDumpMachine + "/" + mVersion + "/include");
-
-        addExistingDirectory(mDefaultCIncludeDirs,
-            includeTrailingPathDelimiter(folder) + "lib/gcc/"
-             + mDumpMachine + "/" + mVersion + "/include-fixed");
-        addExistingDirectory(mDefaultCppIncludeDirs,
-            includeTrailingPathDelimiter(folder) + "lib/gcc/"
-                + mDumpMachine + "/" + mVersion + "/include-fixed");
-
-        // C++ only folder (mingw.org)
-        addExistingDirectory(mDefaultCppIncludeDirs,
-            includeTrailingPathDelimiter(folder)  + "lib/gcc/"
-                + mDumpMachine + "/" + mVersion + "/include/c++");
-        addExistingDirectory(mDefaultCppIncludeDirs,
-             includeTrailingPathDelimiter(folder)  + "lib/gcc/"
-                 + mDumpMachine + "/" + mVersion + "/include/c++/"
-                 + mDumpMachine);
-        addExistingDirectory(mDefaultCppIncludeDirs,
-             includeTrailingPathDelimiter(folder)  + "lib/gcc/"
-                 + mDumpMachine + "/" + mVersion + "/include/c++/backward");
-
-        // C++ only folder (Mingw-w64)
-        addExistingDirectory(mDefaultCppIncludeDirs,
-            includeTrailingPathDelimiter(folder)  + "include/c++/"
-            + mVersion );
-        addExistingDirectory(mDefaultCppIncludeDirs,
-            includeTrailingPathDelimiter(folder)  + "include/c++/"
-            + mVersion + "/backward");
-        addExistingDirectory(mDefaultCppIncludeDirs,
-            includeTrailingPathDelimiter(folder)  + "include/c++/"
-            + mVersion + "/" + mDumpMachine);
-    }
 }
 
 #ifdef ENABLE_SDCC
 void Settings::CompilerSet::setSDCCDirectories(const QString& binDir)
 {
-    QString folder = QFileInfo(binDir).absolutePath();
     QString c_prog = SDCC_PROGRAM;
     // Find default directories
     // C include dirs
@@ -2762,18 +2784,18 @@ void Settings::CompilerSet::setSDCCDirectories(const QString& binDir)
 }
 #endif
 
-int Settings::CompilerSet::mainVersion() const
-{
-    int i = mVersion.indexOf('.');
-    if (i<0)
-        return -1;
-    bool ok;
-    int num = mVersion.left(i).toInt(&ok);
-    if (!ok)
-        return -1;
-    return num;
+// int Settings::CompilerSet::mainVersion() const
+// {
+//     int i = mVersion.indexOf('.');
+//     if (i<0)
+//         return -1;
+//     bool ok;
+//     int num = mVersion.left(i).toInt(&ok);
+//     if (!ok)
+//         return -1;
+//     return num;
 
-}
+// }
 
 bool Settings::CompilerSet::canCompileC() const
 {
@@ -2824,7 +2846,7 @@ void Settings::CompilerSet::setUserInput()
 QString Settings::CompilerSet::findProgramInBinDirs(const QString name) const
 {
     for (const QString& dir : mBinDirs) {
-        QFileInfo f(includeTrailingPathDelimiter(dir) + name);
+        QFileInfo f(getAbsoluteFilePath(dir, name));
         if (f.exists() && f.isExecutable()) {
             return f.absoluteFilePath();
         }
@@ -2843,17 +2865,18 @@ void Settings::CompilerSet::setIniOptions(const QByteArray &value)
    }
 }
 
-QByteArray Settings::CompilerSet::getCompilerOutput(const QString &binDir, const QString &binFile, const QStringList &arguments)
+QByteArray Settings::CompilerSet::getCompilerOutput(const QString &binDir, const QString &binFile, const QStringList &arguments) const
 {
     QProcessEnvironment env;
     env.insert("LANG","en");
     QString path = binDir;
     env.insert("PATH",path);
-    QByteArray result = runAndGetOutput(
-                includeTrailingPathDelimiter(binDir)+binFile,
+    auto [result, _, errorMessage] = runAndGetOutput(
+                getFilePath(binDir, binFile),
                 binDir,
                 arguments,
                 QByteArray(),
+                false,
                 false,
                 env);
     return result.trimmed();
@@ -2901,6 +2924,8 @@ QString Settings::CompilerSet::getOutputFilename(const QString &sourceFilename, 
         return changeFileExt(sourceFilename, preprocessingSuffix());
     case Settings::CompilerSet::CompilationStage::CompilationProperOnly:
         return changeFileExt(sourceFilename, compilationProperSuffix());
+    case Settings::CompilerSet::CompilationStage::GenerateGimple:
+        return changeFileExt(sourceFilename, "gimple");
     case Settings::CompilerSet::CompilationStage::AssemblingOnly:
         return changeFileExt(sourceFilename, assemblingSuffix());
     case Settings::CompilerSet::CompilationStage::GenerateExecutable:
@@ -2919,37 +2944,22 @@ bool Settings::CompilerSet::isOutputExecutable(CompilationStage stage)
     return stage == CompilationStage::GenerateExecutable;
 }
 
-bool Settings::CompilerSet::isDebugInfoUsingUTF8() const
+#ifdef Q_OS_WINDOWS
+bool Settings::CompilerSet::isDebugInfoUsingUTF8()
 {
     switch(mCompilerType) {
     case CompilerType::Clang:
     case CompilerType::GCC_UTF8:
         return true;
     case CompilerType::GCC:
-#ifdef Q_OS_WIN
-        if (mainVersion()>=13) {
-            bool isOk;
-            int productVersion = QSysInfo::productVersion().toInt(&isOk);
-        //    qDebug()<<productVersion<<isOk;
-            if (!isOk) {
-                if (QSysInfo::productVersion().startsWith("7"))
-                    productVersion=7;
-                else if (QSysInfo::productVersion().startsWith("10"))
-                    productVersion=10;
-                else if (QSysInfo::productVersion().startsWith("11"))
-                    productVersion=11;
-                else
-                    productVersion=10;
-            }
-            return productVersion>=10;
+        if (!mGccIsUtf8Initialized) {
+            mGccIsUtf8 = applicationIsUtf8(mCCompiler);
+            mGccIsUtf8Initialized = true;
         }
-#else
-        break;
-#endif
+        return mGccIsUtf8;
     default:
-        break;
+        return false;
     }
-    return false;
 }
 
 bool Settings::CompilerSet::forceUTF8() const
@@ -2957,9 +2967,60 @@ bool Settings::CompilerSet::forceUTF8() const
     return CompilerInfoManager::forceUTF8InDebugger(mCompilerType);
 }
 
-bool Settings::CompilerSet::isCompilerInfoUsingUTF8() const
+bool Settings::CompilerSet::isCompilerInfoUsingUTF8()
 {
     return isDebugInfoUsingUTF8();
+}
+#endif
+
+bool Settings::CompilerSet::supportConvertingCharset()
+{
+#ifdef Q_OS_WIN
+    if (mCompilerType != CompilerType::GCC && mCompilerType != CompilerType::GCC_UTF8)
+        return false;
+    if (!mGccSupportConvertingCharsetInitialized) {
+        mGccSupportConvertingCharset = [this] () {
+            QByteArray verboseOut = getCompilerOutput(QFileInfo(mCCompiler).dir().path(), mCCompiler, {"-v"});
+            QByteArray targetStr = "Configured with: ";
+            int configurationPos = verboseOut.indexOf(targetStr);
+            if (configurationPos < 0)
+                return false;
+            int endPos = verboseOut.indexOf('\n', configurationPos);
+            if (endPos < 0)
+                return false;
+            QByteArray configuration = verboseOut.mid(configurationPos + targetStr.size(), endPos - configurationPos - targetStr.size());
+            return configuration.contains("--with-libiconv") && !configuration.contains("--with-libiconv=no");
+        } ();
+        mGccSupportConvertingCharsetInitialized = true;
+    }
+    return mGccSupportConvertingCharset;
+#else
+    // Unix: iconv is a part of POSIX standard.
+    return mCompilerType == CompilerType::GCC || mCompilerType == CompilerType::GCC_UTF8;
+#endif
+}
+
+bool Settings::CompilerSet::supportNLS()
+{
+    if (mCompilerType != CompilerType::GCC && mCompilerType != CompilerType::GCC_UTF8)
+        return false;
+    if (!mGccSupportNLSInitialized) {
+        mGccSupportNLS = [this] () {
+            QByteArray verboseOut = getCompilerOutput(QFileInfo(mCCompiler).dir().path(), mCCompiler, {"-v"});
+            QByteArray targetStr = "Configured with: ";
+            int configurationPos = verboseOut.indexOf(targetStr);
+            if (configurationPos < 0)
+                return false;
+            int endPos = verboseOut.indexOf('\n', configurationPos);
+            if (endPos < 0)
+                return false;
+            QByteArray configuration = verboseOut.mid(configurationPos + targetStr.size(), endPos - configurationPos - targetStr.size());
+            return configuration.contains("--enable-nls") && !configuration.contains("--disable-nls");
+        } ();
+        mGccSupportNLSInitialized = true;
+    }
+    return mGccSupportNLS;
+
 }
 
 const QString &Settings::CompilerSet::assemblingSuffix() const
@@ -3027,6 +3088,24 @@ void Settings::CompilerSet::setDebugServer(const QString &newDebugServer)
     mDebugServer = newDebugServer;
 }
 
+QStringList Settings::CompilerSet::findErrors()
+{
+    QStringList errors;
+    if (!mCCompiler.isEmpty() && !fileExists(mCCompiler)) {
+        errors.append(QObject::tr("C Compiler \"%1\" is missing!").arg(mCCompiler));
+    }
+    if (!mCppCompiler.isEmpty() && !fileExists(mCppCompiler)) {
+        errors.append(QObject::tr("C++ Compiler \"%1\" is missing!").arg(mCppCompiler));
+    }
+    if (!mDebugger.isEmpty() && !fileExists(mDebugger)) {
+        errors.append(QObject::tr("Debugger \"%1\" is missing!").arg(mDebugger));
+    }
+    if (!mMake.isEmpty() && !fileExists(mMake)) {
+        errors.append(QObject::tr("Make program \"%1\" is missing!").arg(mMake));
+    }
+    return errors;
+}
+
 void Settings::CompilerSet::setCompilerType(CompilerType newCompilerType)
 {
     mCompilerType = newCompilerType;
@@ -3089,8 +3168,8 @@ Settings::PCompilerSet Settings::CompilerSets::addSet(const QJsonObject &set)
     return p;
 }
 
-static void set64_32Options(Settings::PCompilerSet pSet) {
-    pSet->setCompileOption(CC_CMD_OPT_POINTER_SIZE,"32");
+static void setX86MultilibOptions(Settings::PCompilerSet pSet, const QString &value) {
+    pSet->setCompileOption(CC_CMD_OPT_POINTER_SIZE, value);
 }
 
 static void setReleaseOptions(Settings::PCompilerSet pSet) {
@@ -3121,7 +3200,7 @@ static void setDebugOptions(Settings::PCompilerSet pSet, bool enableAsan = false
 }
 
 bool Settings::CompilerSets::addSets(const QString &folder, const QString& c_prog) {
-    foreach (const PCompilerSet& set, mList) {
+    for (const PCompilerSet& set:mList) {
         if (set->binDirs().contains(folder) && extractFileName(set->CCompiler())==c_prog)
             return false;
     }
@@ -3139,21 +3218,25 @@ bool Settings::CompilerSets::addSets(const QString &folder, const QString& c_pro
         QString baseName = baseSet->name();
         QString platformName;
         if (isTarget64Bit(baseSet->target())) {
-            if (baseName.startsWith("TDM-GCC ")) {
-                PCompilerSet set= addSet(baseSet);
-                platformName = "32-bit";
-                set->setName(baseName + " " + platformName + " Release");
-                set64_32Options(set);
-                setReleaseOptions(set);
-
-                set = addSet(baseSet);
-                set->setName(baseName + " " + platformName + " Debug");
-                set64_32Options(set);
-                setDebugOptions(set);
-            }
             platformName = "64-bit";
         } else {
             platformName = "32-bit";
+        }
+
+        // handling x86 multilib
+        if (baseSet->target() == "x86_64") {
+            auto multilibs = baseSet->x86MultilibList(folder, c_prog);
+            for (const QString &value : multilibs) {
+                PCompilerSet set= addSet(baseSet);
+                set->setName(baseName + " multilib " + value + " Release");
+                setX86MultilibOptions(set, value);
+                setReleaseOptions(set);
+
+                set = addSet(baseSet);
+                set->setName(baseName + " multilib " + value + " Debug");
+                setX86MultilibOptions(set, value);
+                setDebugOptions(set);
+            }
         }
 
 
@@ -3239,7 +3322,7 @@ void Settings::CompilerSets::findSets()
     ) {
         QByteArray script = scriptFile.readAll();
         try {
-            compilerHint = AddOn::CompilerHintExecutor{}(script);
+            compilerHint = AddOn::Lua::CompilerHintExecutor{}(script);
         } catch (const AddOn::LuaError &e) {
             QMessageBox::critical(nullptr,
                                   QObject::tr("Error executing platform compiler hint add-on"),
@@ -3269,6 +3352,11 @@ void Settings::CompilerSets::findSets()
         mSettings->dirs().appDir() + "/clang64/bin",
         mSettings->dirs().appDir() + "/mingw64/bin",
         mSettings->dirs().appDir() + "/mingw32/bin",
+
+        // cross toolchain targeting Linux
+        // directory names follow dynamic linker (ld-linux-x86-64.so -> gcc-linux-x86-64)
+        mSettings->dirs().appDir() + "/gcc-linux-x86-64/bin",
+        mSettings->dirs().appDir() + "/gcc-linux-aarch64/bin",
     } + pathList;
 #endif
     QString folder, canonicalFolder;
@@ -3344,7 +3432,6 @@ void Settings::CompilerSets::loadSets()
     }
     PCompilerSet pCurrentSet = defaultSet();
     if (pCurrentSet) {
-        QString msg;
 //        if (!pCurrentSet->dirsValid(msg)) {
 //            if (QMessageBox::warning(nullptr,QObject::tr("Confirm"),
 //                       QObject::tr("The following problems were found during validation of compiler set \"%1\":")
@@ -3380,8 +3467,8 @@ void Settings::CompilerSets::loadSets()
         QString msg = QObject::tr("Compiler set not configuared.")
                 +"<br /><br />"
                 +QObject::tr("Would you like Red Panda C++ to search for compilers in the following locations: <BR />'%1'<BR />'%2'? ")
-                .arg(includeTrailingPathDelimiter(pSettings->dirs().appDir()) + "mingw32")
-                .arg(includeTrailingPathDelimiter(pSettings->dirs().appDir()) + "mingw64");
+                .arg(getFilePath(pSettings->dirs().appDir(), "mingw32"))
+                .arg(getFilePath(pSettings->dirs().appDir(), + "mingw64"));
 #else
         QString msg = QObject::tr("Compiler set not configuared.")
                 +"<br /><br />"
@@ -3393,6 +3480,14 @@ void Settings::CompilerSets::loadSets()
             return;
         }
         findSets();
+        if (size()==0) {
+            QMessageBox::warning(
+                nullptr,
+                QObject::tr("No Compiler Set"),
+                QObject::tr("Can't find a C/C++ compiler.")
+                    +"<br/>"
+                    +QObject::tr("You must have a compiler to compile and execute C/C++ files."));
+        }
         pCurrentSet = defaultSet();
         if (!pCurrentSet) {
             mList.clear();
@@ -3401,6 +3496,7 @@ void Settings::CompilerSets::loadSets()
             return;
         }
         saveSets();
+
     }
 
 }
@@ -3518,7 +3614,7 @@ void Settings::CompilerSets::saveSet(int index)
         mSettings->mSettings.remove(option->key);
     }
     // Save option string
-    for (const QString& optionKey : pSet->compileOptions().keys()) {
+    foreach (const QString& optionKey, pSet->compileOptions().keys()) {
         mSettings->mSettings.setValue(optionKey, pSet->compileOptions().value(optionKey));
     }
 
@@ -3542,7 +3638,6 @@ void Settings::CompilerSets::saveSet(int index)
     // Misc. properties
     mSettings->mSettings.setValue("DumpMachine", pSet->dumpMachine());
     mSettings->mSettings.setValue("Version", pSet->version());
-    mSettings->mSettings.setValue("Type", pSet->type());
     mSettings->mSettings.setValue("Name", pSet->name());
     mSettings->mSettings.setValue("Target", pSet->target());
     mSettings->mSettings.setValue("CompilerType", (int)pSet->compilerType());
@@ -3562,7 +3657,7 @@ QString Settings::CompilerSets::loadPath(const QString &name)
     QString s =  mSettings->mSettings.value(name).toString();
     QString prefix = "%AppPath%/";
     if (s.startsWith(prefix)) {
-        s = includeTrailingPathDelimiter(mSettings->mDirs.appDir()) + s.mid(prefix.length());
+        s = getFilePath(mSettings->mDirs.appDir(), s.mid(prefix.length()));
     }
     return QFileInfo(s).absoluteFilePath();
 }
@@ -3575,7 +3670,7 @@ void Settings::CompilerSets::loadPathList(const QString &name, QStringList& list
     QString prefix = "%AppPath%/";
     for (QString& s:sl) {
         if (s.startsWith(prefix)) {
-            s = includeTrailingPathDelimiter(mSettings->mDirs.appDir()) + s.mid(prefix.length());
+            s = getFilePath(mSettings->mDirs.appDir(), s.mid(prefix.length()));
         }
         list.append(QFileInfo(s).absoluteFilePath());
     }
@@ -3595,7 +3690,6 @@ Settings::PCompilerSet Settings::CompilerSets::loadSet(int index)
 
     pSet->setDumpMachine(mSettings->mSettings.value("DumpMachine").toString());
     pSet->setVersion(mSettings->mSettings.value("Version").toString());
-    pSet->setType(mSettings->mSettings.value("Type").toString());
     pSet->setName(mSettings->mSettings.value("Name").toString());
     pSet->setTarget(mSettings->mSettings.value("Target").toString());
     //compatibility
@@ -3685,6 +3779,7 @@ void Settings::CompilerSets::prepareCompatibleIndex()
     mCompilerCompatibleIndex.append(CC_CMD_OPT_SYNTAX_ONLY);
     mCompilerCompatibleIndex.append(CC_CMD_OPT_WARNING_AS_ERROR);
     mCompilerCompatibleIndex.append(CC_CMD_OPT_ABORT_ON_ERROR);
+    mCompilerCompatibleIndex.append(CC_CMD_OPT_ENABLE_GCC_IMPORT_STD);
 
     mCompilerCompatibleIndex.append(CC_CMD_OPT_PROFILE_INFO);
 
@@ -3759,7 +3854,8 @@ void Settings::Environment::doLoad()
     mIconZoomFactor = doubleValue("icon_zoom_factor",1.0);
     mLanguage = stringValue("language", QLocale::system().name());
     mIconSet = stringValue("icon_set","contrast");
-    mUseCustomIconSet = boolValue("use_custom_icon_set", false);
+    mUseCustomIconSet = boolValue("use_custom_icon_set", false);    
+    mComboboxWheel = boolValue("enable_combobox_wheel", false);
 
     mCurrentFolder = stringValue("current_folder",QDir::currentPath());
     if (!fileExists(mCurrentFolder)) {
@@ -3792,7 +3888,7 @@ void Settings::Environment::doLoad()
     mAStylePath = stringValue("astyle_path","");
     if (mAStylePath.isEmpty()
             /* compatibily for old configuration */
-            || ( mAStylePath == includeTrailingPathDelimiter(pSettings->dirs().appLibexecDir())+"astyle")
+        || ( mAStylePath == getFilePath(pSettings->dirs().appLibexecDir(), "astyle"))
             ) {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         QString path = env.value("PATH");
@@ -3810,8 +3906,7 @@ void Settings::Environment::doLoad()
                 break;
             }
         }
-        if (isGreenEdition())
-            mAStylePath = replacePrefix(mAStylePath, pSettings->dirs().appDir() , "%*APP_DIR*%");
+        mAStylePath = replacePrefix(mAStylePath, pSettings->dirs().appDir() , "%*APP_DIR*%");
     }
 
     mHideNonSupportFilesInFileView=boolValue("hide_non_support_files_file_view",true);
@@ -3881,19 +3976,17 @@ void Settings::Environment::setTerminalPath(const QString &terminalPath)
 QString Settings::Environment::AStylePath() const
 {
     QString path = mAStylePath;
-    if (isGreenEdition()) {
-        path = replacePrefix(path, "%*APP_DIR*%", pSettings->dirs().appDir());
-    }
     if (path.isEmpty())
-        path = includeTrailingPathDelimiter(pSettings->dirs().appLibexecDir())+"astyle";
+        path = getFilePath(pSettings->dirs().appLibexecDir(),ASTYLE_PROGRAM);
+    else
+        path = replacePrefix(path, "%*APP_DIR*%", pSettings->dirs().appDir());
     return path;
 }
 
 void Settings::Environment::setAStylePath(const QString &aStylePath)
 {
     mAStylePath = aStylePath;
-    if (isGreenEdition())
-        mAStylePath = replacePrefix(mAStylePath, pSettings->dirs().appDir() , "%*APP_DIR*%");
+    mAStylePath = replacePrefix(mAStylePath, pSettings->dirs().appDir() , "%*APP_DIR*%");
 }
 
 QString Settings::Environment::terminalArgumentsPattern() const
@@ -3949,7 +4042,7 @@ void Settings::Environment::setIconZoomFactor(double newIconZoomFactor)
 QString Settings::Environment::queryPredefinedTerminalArgumentsPattern(const QString &executable) const
 {
     QString execName = extractFileName(executable);
-    for (const TerminalItem& item: loadTerminalList()) {
+    foreach (const TerminalItem& item, loadTerminalList()) {
         QString termName = extractFileName(item.terminal);
         if (termName.compare(execName,PATH_SENSITIVITY)==0) return item.param;
     }
@@ -4000,12 +4093,22 @@ void Settings::Environment::checkAndSetTerminal()
     QMessageBox::critical(
                 nullptr,
                 QCoreApplication::translate("Settings","Error"),
-        QCoreApplication::translate("Settings","Can't find terminal program!"));
+                QCoreApplication::translate("Settings","Can't find terminal program!"));
 }
 
 QMap<QString, QString> Settings::Environment::terminalArgsPatternMagicVariables()
 {
     return mTerminalArgsPatternMagicVariables;
+}
+
+bool Settings::Environment::comboboxWheel() const
+{
+    return mComboboxWheel;
+}
+
+void Settings::Environment::setComboboxWheel(bool newComboboxWheel)
+{
+    mComboboxWheel=newComboboxWheel;
 }
 
 QList<Settings::Environment::TerminalItem> Settings::Environment::loadTerminalList() const
@@ -4024,9 +4127,9 @@ QList<Settings::Environment::TerminalItem> Settings::Environment::loadTerminalLi
 
     QList<Settings::Environment::TerminalItem> result;
     // determing terminal (if not set yet) and build predefined arguments pattern map from our list
-    for (const auto &terminalGroup: terminalListDocument.array()) {
+    foreach (const auto &terminalGroup, terminalListDocument.array()) {
         const QJsonArray &terminals = terminalGroup.toObject()["terminals"].toArray();
-        for (const auto &terminal_: terminals) {
+        foreach (const auto &terminal_, terminals) {
             const QJsonObject& terminal = terminal_.toObject();
             QString path = terminal["path"].toString();
             QString termExecutable = QFileInfo(path).fileName();
@@ -4082,6 +4185,7 @@ void Settings::Environment::doSave()
     saveValue("icon_set",mIconSet);
     saveValue("use_custom_icon_set", mUseCustomIconSet);
     saveValue("use_custom_theme", mUseCustomTheme);
+    saveValue("enable_combobox_wheel", mComboboxWheel);
 
     saveValue("current_folder",mCurrentFolder);
     saveValue("default_open_folder",mDefaultOpenFolder);
@@ -4134,6 +4238,7 @@ const QMap<QString, QString> Settings::Environment::mTerminalArgsPatternMagicVar
     {"dos_command", "$dos_command"},
     {"lpCommandLine", "$lpCommandLine"},
     {"tmpfile", "$tmpfile"},
+    {"sequential_app_id", "$sequential_app_id"},
 };
 
 Settings::Executor::Executor(Settings *settings):_Base(settings, SETTING_EXECUTOR)
@@ -4271,6 +4376,16 @@ void Settings::Executor::setEnableVirualTerminalSequence(bool newEnableVirualTer
     mEnableVirualTerminalSequence = newEnableVirualTerminalSequence;
 }
 
+qint64 Settings::Executor::maxCaseInputFileSize() const
+{
+    return mMaxCaseInputFileSize;
+}
+
+void Settings::Executor::setMaxCaseInputFileSize(qint64 newMaxCaseInputFileSize)
+{
+    mMaxCaseInputFileSize = newMaxCaseInputFileSize;
+}
+
 bool Settings::Executor::convertHTMLToTextForInput() const
 {
     return mConvertHTMLToTextForInput;
@@ -4357,6 +4472,7 @@ void Settings::Executor::doSave()
     saveValue("case_memory_limit",mCaseMemoryLimit);
     remove("case_timeout");
     saveValue("enable_case_limit", mEnableCaseLimit);
+    saveValue("case_max_input_file_size",mMaxCaseInputFileSize);
 }
 
 bool Settings::Executor::pauseConsole() const
@@ -4400,10 +4516,8 @@ void Settings::Executor::doLoad()
     mCaseMemoryLimit = uintValue("case_memory_limit",0); // kb
 
     mEnableCaseLimit = boolValue("enable_case_limit", true);
-    //compatibility
-    if (boolValue("enable_time_limit", true)) {
-        mEnableCaseLimit=true;
-    }
+
+    mMaxCaseInputFileSize = uintValue("case_max_input_file_size", 4); //4mb
 }
 
 
@@ -4655,32 +4769,15 @@ void Settings::CodeCompletion::setShowCodeIns(bool newShowCodeIns)
     mShowCodeIns = newShowCodeIns;
 }
 
-//bool Settings::CodeCompletion::clearWhenEditorHidden()
-//{
-//    if (!mShareParser) {
-//#ifdef Q_OS_WIN
-//        MEMORYSTATUSEX statex;
-//        statex.dwLength = sizeof (statex);
-//        GlobalMemoryStatusEx (&statex);
+bool Settings::CodeCompletion::clearWhenEditorHidden()
+{
+    return mClearWhenEditorHidden;
+}
 
-//        if (statex.ullAvailPhys < (long long int)2*1024*1024*1024) {
-//            return true;
-//        }
-//#elif defined(Q_OS_LINUX)
-//        struct sysinfo si;
-//        sysinfo(&si);
-//        if (si.freeram < (long long int)2*1024*1024*1024) {
-//            return true;
-//        }
-//#endif
-//    }
-//    return mClearWhenEditorHidden;
-//}
-
-//void Settings::CodeCompletion::setClearWhenEditorHidden(bool newClearWhenEditorHidden)
-//{
-//    mClearWhenEditorHidden = newClearWhenEditorHidden;
-//}
+void Settings::CodeCompletion::setClearWhenEditorHidden(bool newClearWhenEditorHidden)
+{
+    mClearWhenEditorHidden = newClearWhenEditorHidden;
+}
 
 int Settings::CodeCompletion::minCharRequired() const
 {
@@ -4846,7 +4943,7 @@ void Settings::CodeCompletion::doSave()
     saveValue("ignore_case",mIgnoreCase);
     saveValue("append_func",mAppendFunc);
     saveValue("show_code_ins",mShowCodeIns);
-    //saveValue("clear_when_editor_hidden",mClearWhenEditorHidden);
+    saveValue("clear_when_editor_hidden",mClearWhenEditorHidden);
     saveValue("min_char_required",mMinCharRequired);
     saveValue("hide_symbols_start_with_two_underline", mHideSymbolsStartsWithTwoUnderLine);
     saveValue("hide_symbols_start_with_underline", mHideSymbolsStartsWithUnderLine);
@@ -4874,35 +4971,8 @@ void Settings::CodeCompletion::doLoad()
     mHideSymbolsStartsWithUnderLine = boolValue("hide_symbols_start_with_underline", true);
 
     bool shouldShare= true;
-//    bool doClear = false;
-
-//#ifdef Q_OS_WIN
-//    MEMORYSTATUSEX statex;
-
-//    statex.dwLength = sizeof (statex);
-
-//    GlobalMemoryStatusEx (&statex);
-
-//    if (statex.ullAvailPhys > (long long int)32*1024*1024*1024) {
-//        shouldShare = false;
-//    }
-
-////    if (shouldShare) {
-////        SYSTEM_INFO info;
-////        GetSystemInfo(&info);
-////        if (info.dwNumberOfProcessors>8 && info.dwProcessorType) {
-////            doClear = true;
-////        }
-////    }
-//#elif defined(Q_OS_LINUX)
-//    struct sysinfo si;
-//    sysinfo(&si);
-//    if (si.freeram > (long long int)24*1024*1024*1024) {
-//        shouldShare = false;
-//    }
-//#endif
-    //mClearWhenEditorHidden = boolValue("clear_when_editor_hidden",doClear);
     mShareParser = boolValue("share_parser",shouldShare);
+    mClearWhenEditorHidden = boolValue("clear_when_editor_hidden", mShareParser);
 }
 
 Settings::CodeFormatter::CodeFormatter(Settings *settings):
@@ -4914,6 +4984,8 @@ Settings::CodeFormatter::CodeFormatter(Settings *settings):
 QStringList Settings::CodeFormatter::getArguments()
 {
     QStringList result;
+    //force use english language
+    result.append("-I");
     switch(mBraceStyle) {
     case FormatterBraceStyle::fbsDefault:
         break;

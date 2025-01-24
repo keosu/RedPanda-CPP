@@ -78,8 +78,6 @@ class VisitHistoryManager;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
-
-
     enum class CompileIssuesState{
         CompilationResultFilled,
         Compiling,
@@ -137,6 +135,7 @@ public:
     void updateCompileActions();
     void updateCompileActions(const Editor* e);
     void updateEditorColorSchemes();
+    void updateFileTypeActions(const Editor *e);
     void updateCompilerSet();
     void updateCompilerSet(const Editor* e);
     void updateDebuggerSettings();
@@ -179,8 +178,6 @@ public:
 
     void newEditor(const QString& suffix="");
 
-    QPlainTextEdit* txtLocals();
-
     QMenuBar* menuBar() const;
 
     CPUDialog *cpuDialog() const;
@@ -195,11 +192,11 @@ public:
 
     SearchResultModel* searchResultModel();
 
-    const std::shared_ptr<CodeCompletionPopup> &completionPopup() const;
+    CodeCompletionPopup *completionPopup() const;
 
-    const std::shared_ptr<HeaderCompletionPopup> &headerCompletionPopup() const;
+    HeaderCompletionPopup *headerCompletionPopup() const;
 
-    const std::shared_ptr<FunctionTooltipWidget> &functionTip() const;
+    FunctionTooltipWidget *functionTip() const;
 
     CaretList &caretList();
     void updateCaretActions();
@@ -208,21 +205,21 @@ public:
 
     const std::shared_ptr<QHash<StatementKind, std::shared_ptr<ColorSchemeItem> > > &statementColors() const;
 
-    PSymbolUsageManager &symbolUsageManager();
+    SymbolUsageManager *symbolUsageManager() const;
 
-    PCodeSnippetManager &codeSnippetManager();
+    CodeSnippetsManager *codeSnippetManager() const;
 
     const PTodoParser &todoParser() const;
 
-    const PToolsManager &toolsManager() const;
+    ToolsManager *toolsManager() const;
 
     bool shouldRemoveAllSettings() const;
 
-    const PBookmarkModel &bookmarkModel() const;
+    BookmarkModel *bookmarkModel() const;
 
     TodoModel* todoModel();
 
-    Editor* openFile(QString filename, bool activate=true, QTabWidget* page=nullptr);
+    Editor* openFile(QString filename, bool activate=true, QTabWidget* page=nullptr, FileType fileType=FileType::None, const QString& contextFile = QString());
     void openProject(QString filename, bool openFiles = true);
     void changeOptions(const QString& widgetName=QString(), const QString& groupName=QString());
     void changeProjectOptions(const QString& widgetName=QString(), const QString& groupName=QString());
@@ -277,6 +274,7 @@ public slots:
     void setActiveBreakpoint(QString FileName, int Line, bool setFocus);
     void updateDPI(int oldDPI, int newDPI);
     void onFileSaved(const QString& path, bool inProject);
+    void onDebugFinished();
 
 private:
     void executeTool(PToolItem item);
@@ -316,6 +314,7 @@ private:
     void clearIssues();
     void doCompileRun(RunType runType);
     void doGenerateAssembly();
+    void doGenerateGimple();
     void updateProblemCaseOutput(POJProblemCase problemCase);
     void applyCurrentProblemCaseChanges();
     void showHideInfosTab(QWidget *widget, bool show);
@@ -337,6 +336,7 @@ private:
     void initEditorActions();
     void changeEditorActionParent(QAction *action, const QString& groupName);
     void backupMenuForEditor(QMenu* menu, QList<QAction *> &backup);
+    void validateCompilerSet(int index);
 
 private slots:
     void setupSlotsForProject();
@@ -374,7 +374,7 @@ private slots:
     void onProblemNameChanged(int index);
     void onProblemRunCurrentCase();
     void onProblemBatchSetCases();
-    void onNewProblemReceived(POJProblem newProblem);
+    void onNewProblemReceived(int num, int total, POJProblem newProblem);
     void updateProblemTitle();
     void onEditorClosed();
     void onToolsOutputClear();
@@ -860,6 +860,20 @@ private slots:
 
     void on_actionCode_Completion_triggered();
 
+    void on_actionC_C_Header_triggered();
+
+    void on_actionText_File_triggered();
+
+    void on_actionC_File_triggered();
+
+    void on_actionCPP_File_triggered();
+
+    void on_actionATT_ASM_triggered();
+
+    void on_actionIntel_ASM_triggered();
+
+    void on_actionGenerate_GIMPLE_triggered();
+
 private:
     Ui::MainWindow *ui;
     bool mFullInitialized;
@@ -884,8 +898,8 @@ private:
     QList<QAction *> mMenuMoveCaretBackup;
 
     QComboBox *mCompilerSet;
-    std::shared_ptr<CompilerManager> mCompilerManager;
-    std::shared_ptr<Debugger> mDebugger;
+    CompilerManager *mCompilerManager;
+    Debugger *mDebugger;
     CPUDialog *mCPUDialog;
     SearchInFileDialog *mSearchInFilesDialog;
     SearchDialog *mSearchDialog;
@@ -895,31 +909,31 @@ private:
     bool mClosingProject;
     QElapsedTimer mParserTimer;
     QFileSystemWatcher mFileSystemWatcher;
-    std::shared_ptr<Project> mProject;
+    std::shared_ptr<Project> mProject; //mProject can be destoryed any time
     Qt::DockWidgetArea mMessagesDockLocation;
 
-    std::shared_ptr<CodeCompletionPopup> mCompletionPopup;
-    std::shared_ptr<HeaderCompletionPopup> mHeaderCompletionPopup;
-    std::shared_ptr<FunctionTooltipWidget> mFunctionTip;
+    CodeCompletionPopup *mCompletionPopup;
+    HeaderCompletionPopup *mHeaderCompletionPopup;
+    FunctionTooltipWidget *mFunctionTip;
 
     std::shared_ptr<VisitHistoryManager> mVisitHistoryManager;
 
-    TodoModel mTodoModel;
-    SearchResultModel mSearchResultModel;
-    PBookmarkModel mBookmarkModel;
-    PSearchResultListModel mSearchResultListModel;
-    PSearchResultTreeModel mSearchResultTreeModel;
-    PSearchResultTreeViewDelegate mSearchViewDelegate;
-    ClassBrowserModel mClassBrowserModel;
+    TodoModel *mTodoModel;
+    SearchResultModel *mSearchResultModel;
+    BookmarkModel *mBookmarkModel;
+    SearchResultListModel *mSearchResultListModel;
+    SearchResultTreeModel *mSearchResultTreeModel;
+    SearchResultTreeViewDelegate *mSearchViewDelegate;
+    ClassBrowserModel *mClassBrowserModel;
     std::shared_ptr<QHash<StatementKind, std::shared_ptr<ColorSchemeItem> > > mStatementColors;
-    PSymbolUsageManager mSymbolUsageManager;
-    PCodeSnippetManager mCodeSnippetManager;
+    SymbolUsageManager *mSymbolUsageManager;
+    CodeSnippetsManager *mCodeSnippetManager;
     PTodoParser mTodoParser;
-    PToolsManager mToolsManager;
-    CustomFileSystemModel mFileSystemModel;
+    ToolsManager *mToolsManager;
+    CustomFileSystemModel *mFileSystemModel;
     CustomFileIconProvider mFileSystemModelIconProvider;
-    OJProblemSetModel mOJProblemSetModel;
-    OJProblemModel mOJProblemModel;
+    OJProblemSetModel *mOJProblemSetModel;
+    OJProblemModel *mOJProblemModel;
     int mOJProblemSetNameCounter;
 
     QString mClassBrowserCurrentStatement;
@@ -1044,12 +1058,14 @@ protected:
     // QObject interface
 public:
     bool event(QEvent *event) override;
+
     bool isClosingAll() const;
     bool isQuitting() const;
     const std::shared_ptr<VisitHistoryManager> &visitHistoryManager() const;
     bool closingProject() const;
     bool openingFiles() const;
     bool openingProject() const;
+
 };
 
 extern MainWindow* pMainWindow;

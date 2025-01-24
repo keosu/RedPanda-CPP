@@ -135,9 +135,6 @@ public:
         bool showIndentLines() const;
         void setShowIndentLines(bool showIndentLines);
 
-        QColor indentLineColor() const;
-        void setIndentLineColor(const QColor &indentLineColor);
-
         bool enhanceHomeKey() const;
         void setEnhanceHomeKey(bool enhanceHomeKey);
 
@@ -392,6 +389,18 @@ public:
         bool forceFixedFontWidth() const;
         void setForceFixedFontWidth(bool newForceFixedWidth);
 
+        bool copyHTMLWithLineNumber() const;
+        void setCopyHTMLWithLineNumber(bool newCopyHTMLWithLineNumber);
+
+        bool copyHTMLRecalcLineNumber() const;
+        void setCopyHTMLRecalcLineNumber(bool newCopyHTMLRecalcLineNumber);
+
+        bool rainbowIndentGuides() const;
+        void setRainbowIndentGuides(bool newIndentLineUsingRainbowColor);
+
+        bool rainbowIndents() const;
+        void setRainbowIndents(bool newFillIndentsUsingRainbowColor);
+
     private:
         //General
         // indents
@@ -399,8 +408,9 @@ public:
         bool mTabToSpaces;
         int mTabWidth;
         bool mShowIndentLines;
-        QColor mIndentLineColor;
-        bool mfillIndents;
+        bool mFillIndents;
+        bool mRainbowIndentGuides;
+        bool mRainbowIndents;
         // caret
         bool mEnhanceHomeKey;
         bool mEnhanceEndKey;
@@ -462,6 +472,8 @@ public:
         QString mCopyRTFColorScheme;
         bool mCopyHTMLUseBackground;
         bool mCopyHTMLUseEditorColor;
+        bool mCopyHTMLWithLineNumber;
+        bool mCopyHTMLRecalcLineNumber;
         QString mCopyHTMLColorScheme;
 
         //Color
@@ -519,6 +531,8 @@ public:
         bool mShowFunctionTips;
 
         // _Base interface
+        Q_PROPERTY(bool rainbowIndents READ rainbowIndents WRITE setRainbowIndents NOTIFY fillIndentsUsingRainbowColorChanged)
+
     protected:
         void doSave() override;
         void doLoad() override;
@@ -587,6 +601,9 @@ public:
 
         static QMap<QString, QString> terminalArgsPatternMagicVariables();
 
+        bool comboboxWheel() const;
+        void setComboboxWheel(bool newComboboxWheel);
+
     private:
         bool isTerminalValid();
         void checkAndSetTerminal();
@@ -601,6 +618,7 @@ public:
         QString mIconSet;
         bool mUseCustomIconSet;
         bool mUseCustomTheme;
+        bool mComboboxWheel;
 
         QString mDefaultOpenFolder;
         QString mTerminalPath;
@@ -656,8 +674,8 @@ public:
         bool showCodeIns() const;
         void setShowCodeIns(bool newShowCodeIns);
 
-        //bool clearWhenEditorHidden();
-        //void setClearWhenEditorHidden(bool newClearWhenEditorHidden);
+        bool clearWhenEditorHidden();
+        void setClearWhenEditorHidden(bool newClearWhenEditorHidden);
 
         int minCharRequired() const;
         void setMinCharRequired(int newMinCharRequired);
@@ -687,7 +705,7 @@ public:
         int mMinCharRequired;
         bool mHideSymbolsStartsWithTwoUnderLine;
         bool mHideSymbolsStartsWithUnderLine;
-        //bool mClearWhenEditorHidden;
+        bool mClearWhenEditorHidden;
         bool mShareParser;
 
         // _Base interface
@@ -948,6 +966,9 @@ public:
 
         bool enableVirualTerminalSequence() const;
         void setEnableVirualTerminalSequence(bool newEnableVirualTerminalSequence);
+        qint64 maxCaseInputFileSize() const;
+        void setMaxCaseInputFileSize(qint64 newMaxCaseInputFileSize);
+
     private:
         // general
         bool mPauseConsole;
@@ -973,6 +994,7 @@ public:
         bool mEnableCaseLimit;
         qulonglong mCaseTimeout; //ms
         qulonglong mCaseMemoryLimit; //kb
+        qint64 mMaxCaseInputFileSize; // mb
 
     protected:
         void doSave() override;
@@ -1340,7 +1362,8 @@ public:
             PreprocessingOnly,
             CompilationProperOnly,
             AssemblingOnly,
-            GenerateExecutable
+            GenerateGimple,
+            GenerateExecutable,
         };
 
         explicit CompilerSet();
@@ -1353,6 +1376,7 @@ public:
 
         // Initialization
         void setProperties(const QString& binDir, const QString& c_prog);
+        QStringList x86MultilibList(const QString &folder, const QString &c_prog) const;
 
         void resetCompileOptionts();
         bool setCompileOption(const QString& key, int valIndex);
@@ -1362,7 +1386,7 @@ public:
 
         QString getCompileOptionValue(const QString& key) const;
 
-        int mainVersion() const;
+        // int mainVersion() const;
         QString findProgramInBinDirs(const QString name) const;
 
         bool canCompileC() const;
@@ -1385,6 +1409,8 @@ public:
         const QString &debugServer() const;
         void setDebugServer(const QString &newDebugServer);
 
+        QStringList findErrors();
+
         QStringList& binDirs();
         QStringList& CIncludeDirs();
         QStringList& CppIncludeDirs();
@@ -1397,8 +1423,6 @@ public:
         void setDumpMachine(const QString& value);
         const QString& version() const;
         void setVersion(const QString& value);
-        const QString& type() const;
-        void setType(const QString& value);
         const QString& name() const;
         void setName(const QString& value);
         QStringList defines(bool isCpp);
@@ -1454,9 +1478,18 @@ public:
         bool isOutputExecutable();
         bool isOutputExecutable(Settings::CompilerSet::CompilationStage stage);
 
-        bool isDebugInfoUsingUTF8() const;
+#ifdef Q_OS_WINDOWS
+        bool isDebugInfoUsingUTF8();
         bool forceUTF8() const;
-        bool isCompilerInfoUsingUTF8() const;
+        bool isCompilerInfoUsingUTF8();
+#else
+        constexpr bool isDebugInfoUsingUTF8() const { return true; }
+        constexpr bool forceUTF8() const { return true; }
+        constexpr bool isCompilerInfoUsingUTF8() const { return true; }
+#endif
+
+        bool supportConvertingCharset();
+        bool supportNLS();
 
         bool persistInAutoFind() const;
         void setPersistInAutoFind(bool newPersistInAutoFind);
@@ -1478,7 +1511,7 @@ public:
 
 
         QByteArray getCompilerOutput(const QString& binDir, const QString& binFile,
-                                     const QStringList& arguments);
+                                     const QStringList& arguments) const;
     private:
         bool mFullLoaded;
         // Executables, most are hardcoded
@@ -1499,12 +1532,11 @@ public:
         QStringList mDefaultCppIncludeDirs;
 
         // Misc. properties
-        QString mDumpMachine; // "x86_64-w64-mingw32", "mingw32" etc
-        QString mVersion; // "4.7.1"
-        QString mType; // "TDM-GCC", "MinGW"
-        QString mName; // "TDM-GCC 4.7.1 Release"
-        QString mTarget; // 'X86_64' / 'i686'
-        CompilerType mCompilerType; // 'Clang' / 'GCC'
+        QString mDumpMachine; // "x86_64-w64-mingw32", "x86_64-pc-linux-gnu", etc
+        QString mVersion; // "14.2.0", "14" (--with-gcc-major-version-only)
+        QString mName; // "MinGW-w64 GCC 14.2.0 Release"
+        QString mTarget; // "x86_64", "i686", etc
+        CompilerType mCompilerType;
 
         // User settings
         bool mUseCustomCompileParams;
@@ -1526,6 +1558,16 @@ public:
 
         // Options
         QMap<QString,QString> mCompileOptions;
+
+        bool mGccSupportNLS;
+        bool mGccSupportNLSInitialized;
+#ifdef Q_OS_WINDOWS
+        // GCC ACP detection cache
+        bool mGccIsUtf8;
+        bool mGccIsUtf8Initialized;
+        bool mGccSupportConvertingCharset;
+        bool mGccSupportConvertingCharsetInitialized;
+#endif
     };
 
     typedef std::shared_ptr<CompilerSet> PCompilerSet;
@@ -1535,6 +1577,7 @@ public:
     public:
         explicit CompilerSets(Settings* settings);
         PCompilerSet addSet();
+        PCompilerSet addSet(const PCompilerSet &pSet);
         bool addSets(const QString& folder);
         bool addSets(const QString& folder, const QString& c_prog);
         CompilerSetList clearSets();
@@ -1556,7 +1599,6 @@ public:
         static bool isTarget64Bit(const QString &target);
     private:
         PCompilerSet addSet(const QString& folder, const QString& c_prog);
-        PCompilerSet addSet(const PCompilerSet &pSet);
         PCompilerSet addSet(const QJsonObject &set);
         void savePath(const QString& name, const QString& path);
         void savePathList(const QString& name, const QStringList& pathList);

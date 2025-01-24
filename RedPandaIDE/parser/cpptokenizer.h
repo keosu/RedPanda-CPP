@@ -24,6 +24,7 @@ class CppTokenizer
 {
     enum class TokenType {
         Normal,
+        Identifier,
         LeftBrace,
         RightBrace,
         LeftParenthesis,
@@ -31,7 +32,8 @@ class CppTokenizer
         LeftBracket,
         RightBracket,
         Assignment,
-        LambdaCaptures
+        LambdaCaptures,
+        None
     };
 
 public:
@@ -113,7 +115,7 @@ private:
     }
 
     static bool isBlankChar(const QChar& ch) {
-        return (ch<=32) && (ch>0);
+        return (ch.unicode() <= 32) && (ch.unicode() > 0);
     }
 
 //    static bool isOperatorChar(const QChar& ch) {
@@ -151,6 +153,7 @@ private:
     const QChar* mLineCount;
     int mCurrentLine;
     QString mLastToken;
+    TokenType mLastTokenType;
     TokenList mTokenList;
     QList<int> mLambdas;
     QVector<int> mUnmatchedBraces; // stack of indices for unmatched '{'

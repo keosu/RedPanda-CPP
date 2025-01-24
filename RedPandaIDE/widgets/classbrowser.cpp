@@ -150,6 +150,17 @@ QVariant ClassBrowserModel::data(const QModelIndex &index, int role) const
                      || (node->statement->kind == StatementKind::Typedef)
                      ) {
                     return node->statement->command + node->statement->args + " : " + node->statement->type;
+                } else if (node->statement->kind == StatementKind::OverloadedOperator) {
+                    if (!CppParser::isIdentifier(node->statement->command)) {
+                        return "operator"+node->statement->command + node->statement->args + " : " + node->statement->type;
+                    } else if (node->statement->command == "new"
+                               || node->statement->command == "delete") {
+                        return "operator "+node->statement->command + node->statement->args + " : " + node->statement->type;
+                    } else {
+                        return "operator "+node->statement->command + node->statement->args + " : " + node->statement->type + " " + node->statement->command;
+                    }
+                } else if (node->statement->kind == StatementKind::LiteralOperator) {
+                    return "operator \"\""+node->statement->command + node->statement->args + " : " + node->statement->type;
                 }
             }
             if (node->statement->kind == StatementKind::Enum) {
@@ -229,8 +240,8 @@ void ClassBrowserModel::fillStatements()
         mUpdating = true;
     }
     emit refreshStarted();
-    beginResetModel();
     clear();
+    beginResetModel();
     {
         auto action = finally([this]{
             endResetModel();
@@ -243,7 +254,6 @@ void ClassBrowserModel::fillStatements()
             return;
         if (!mParser->freeze())
             return;
-        QString mParserSerialId = mParser->serialId();
         addMembers();
         mParser->unFreeze();
     }
@@ -259,8 +269,8 @@ PClassBrowserNode ClassBrowserModel::addChild(ClassBrowserNode *node, const PSta
     mNodes.append(newNode);
     mNodeIndex.insert(
                 QString("%1+%2+%3")
-                .arg(statement->fullName)
-                .arg(statement->noNameArgs)
+                .arg(statement->fullName,
+                     statement->noNameArgs)
                 .arg((int)statement->kind),newNode);
     mProcessedStatements.insert(statement.get());
     if (isScopeStatement(statement)) {
@@ -375,7 +385,8 @@ void ClassBrowserModel::filterChildren(ClassBrowserNode *node, const StatementMa
             continue;
 
         if (pSettings->codeCompletion().hideSymbolsStartsWithUnderLine()
-                && statement->command.startsWith('_'))
+                && statement->command.startsWith('_')
+                && statement->kind != StatementKind::LiteralOperator)
             continue;
 
         ClassBrowserNode *parentNode=node;
@@ -463,7 +474,7 @@ bool ClassBrowserModel::isScopeStatement(const PStatement &statement)
     }
 }
 
-QModelIndex ClassBrowserModel::modelIndexForStatement(const QString &key)
+QModelIndex ClassBrowserModel::modelIndexForStatement(const QString &key) const
 {
     QMutexLocker locker(&mMutex);
     if (mUpdating)

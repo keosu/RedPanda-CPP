@@ -4,7 +4,6 @@
 #include <QString>
 #include <QMap>
 #include <memory>
-#include <QMutex>
 #define COMPILER_CLANG "Clang"
 #define COMPILER_GCC "GCC"
 #define COMPILER_GCC_UTF8 "GCC_UTF8"
@@ -32,6 +31,7 @@
 #define CC_CMD_OPT_SYNTAX_ONLY "cc_cmd_opt_syntax_only"
 #define CC_CMD_OPT_WARNING_AS_ERROR "cc_cmd_opt_warning_as_error"
 #define CC_CMD_OPT_ABORT_ON_ERROR "cc_cmd_opt_abort_on_error"
+#define CC_CMD_OPT_ENABLE_GCC_IMPORT_STD "cc_opt_enable_gcc_import_std"
 
 #define CC_CMD_OPT_PROFILE_INFO "cc_cmd_opt_profile_info"
 
@@ -127,7 +127,6 @@ public:
     bool hasCompilerOption(const QString& key) const;
     void init();
 
-    virtual bool supportConvertingCharset()=0;
     virtual bool forceUTF8InDebugger()=0;
     virtual bool forceUTF8InMakefile()=0;
     virtual bool supportStaticLink()=0;
@@ -174,7 +173,6 @@ public:
     static bool hasCompilerOption(CompilerType compilerType, const QString& optKey);
     static PCompilerOption getCompilerOption(CompilerType compilerType, const QString& optKey);
     static QList<PCompilerOption> getCompilerOptions(CompilerType compilerType);
-    static bool supportCovertingCharset(CompilerType compilerType);
     static bool supportStaticLink(CompilerType compilerType);
     static bool supportSyntaxCheck(CompilerType compilerType);
     static bool forceUTF8InDebugger(CompilerType compilerType);
@@ -188,7 +186,6 @@ private:
 class ClangCompilerInfo: public CompilerInfo{
 public:
     ClangCompilerInfo();
-    bool supportConvertingCharset() override;
     bool forceUTF8InDebugger() override;
     bool forceUTF8InMakefile() override;
     bool supportStaticLink() override;
@@ -197,7 +194,6 @@ public:
 class GCCCompilerInfo: public CompilerInfo{
 public:
     GCCCompilerInfo();
-    bool supportConvertingCharset() override;
     bool forceUTF8InDebugger() override;
     bool forceUTF8InMakefile() override;
     bool supportStaticLink() override;
@@ -206,7 +202,6 @@ public:
 class GCCUTF8CompilerInfo: public CompilerInfo{
 public:
     GCCUTF8CompilerInfo();
-    bool supportConvertingCharset() override;
     bool forceUTF8InDebugger() override;
     bool forceUTF8InMakefile() override;
     bool supportStaticLink() override;
@@ -216,7 +211,6 @@ public:
 class SDCCCompilerInfo: public CompilerInfo{
 public:
     SDCCCompilerInfo();
-    bool supportConvertingCharset() override;
     bool forceUTF8InDebugger() override;
     bool forceUTF8InMakefile() override;
     bool supportStaticLink() override;

@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-ASTYLE_VERSION_TAG="3.4.15"
+ASTYLE_VERSION_TAG="3.6.4"
 
 function fn_print_help() {
   echo " Usage:
@@ -10,12 +10,14 @@ function fn_print_help() {
  Options:
    -h, --help               Display this information.
    -m, --msystem <MSYSTEM>  Switch to other MSYS2 environment.
-                            (MINGW32, MINGW64, UCRT64, CLANG32, CLANG64, CLANGARM64)
+                            (MINGW32, MINGW64, UCRT64, CLANG64, CLANGARM64)
                             MUST be used before other options.
    -c, --clean              Clean build and package directories.
    --mingw                  Alias for --mingw32 (x86 app) or --mingw64 (x64 app).
    --mingw32                Build mingw32 integrated compiler.
    --mingw64                Build mingw64 integrated compiler.
+   --gcc-linux-x86-64       Build x86_64-linux-gnu integrated compiler.
+   --gcc-linux-aarch64      Build aarch64-linux-gnu integrated compiler.
    --ucrt <build>           Include UCRT in the package. Windows SDK required.
                             e.g. '--ucrt 22621' for Windows 11 SDK 22H2.
    -nd, --no-deps           Skip dependency check.
@@ -33,7 +35,7 @@ if [[ $# -gt 1 && ($1 == "-m" || $1 == "--msystem") ]]; then
   msystem=$2
   shift 2
   case "${msystem}" in
-    MINGW32|MINGW64|UCRT64|CLANG32|CLANG64|CLANGARM64)
+    MINGW32|MINGW64|UCRT64|CLANG64|CLANGARM64)
       export MSYSTEM="${msystem}"
       exec /bin/bash --login "$0" "$@"
       ;;
@@ -45,7 +47,10 @@ if [[ $# -gt 1 && ($1 == "-m" || $1 == "--msystem") ]]; then
 fi
 
 case "${MSYSTEM}" in
-  MINGW32|CLANG32)  # there is no UCRT32
+  MINGW32)
+    # there is no UCRT32
+    # CLANG32 qt5-static removed since 5.15.15
+    # https://github.com/msys2/MINGW-packages/commit/ab062c6e5d6e9fff86ee8f88c1d8e9601ea9ab5b
     NSIS_ARCH=x86
     PACKAGE_BASENAME="RedPanda.C++.${APP_VERSION}.win32"
     ;;
@@ -59,7 +64,7 @@ case "${MSYSTEM}" in
     ;;
   *)
     echo "This script must be run in one of the following MSYS2 shells:"
-    echo "  - MINGW32 / CLANG32"
+    echo "  - MINGW32"
     echo "  - MINGW64 / UCRT64 / CLANG64"
     echo "  - CLANGARM64"
     exit 1
@@ -71,6 +76,10 @@ CHECK_DEPS=1
 compilers=()
 COMPILER_MINGW32=0
 COMPILER_MINGW64=0
+COMPILER_GCC_LINUX_X8664=0
+COMPILER_GCC_LINUX_AARCH64=0
+REQUIRED_WINDOWS_BUILD=7600
+REQUIRED_WINDOWS_NAME="Windows 7"
 TARGET_DIR="$(pwd)/dist"
 UCRT=""
 while [[ $# -gt 0 ]]; do
@@ -111,9 +120,39 @@ while [[ $# -gt 0 ]]; do
       COMPILER_MINGW64=1
       shift
       ;;
+    --gcc-linux-x86-64)
+      case "${NSIS_ARCH}" in
+        x64)
+          compilers+=("gcc-linux-x86-64")
+          COMPILER_GCC_LINUX_X8664=1
+          REQUIRED_WINDOWS_BUILD=17763
+          REQUIRED_WINDOWS_NAME="Windows 10 v1809"
+          shift
+          ;;
+        *)
+          echo "architecture mismatch, --gcc-linux-x86-64 is only supported on x64"
+          exit 1
+          ;;
+      esac
+      ;;
+    --gcc-linux-aarch64)
+      case "${NSIS_ARCH}" in
+        arm64)
+          compilers+=("gcc-linux-aarch64")
+          COMPILER_GCC_LINUX_AARCH64=1
+          REQUIRED_WINDOWS_BUILD=22000
+          REQUIRED_WINDOWS_NAME="Windows 11"
+          shift
+          ;;
+        *)
+          echo "architecture mismatch, --gcc-linux-aarch64 is only supported on arm64"
+          exit 1
+          ;;
+      esac
+      ;;
     --ucrt)
       case "${MSYSTEM}" in
-        CLANG32|UCRT64|CLANG64)
+        UCRT64|CLANG64)
           UCRT="$2"
           shift 2
           ;;
@@ -151,21 +190,41 @@ SOURCE_DIR="$(pwd)"
 ASSETS_DIR="${SOURCE_DIR}/assets"
 UCRT_DIR="/c/Program Files (x86)/Windows Kits/10/Redist/10.0.${UCRT}.0/ucrt/DLLs/${NSIS_ARCH}"
 
+case "${MSYSTEM}" in
+  MINGW32)
+    # 32-bit 7zip removed since 24.05
+    # https://github.com/msys2/MINGW-packages/commit/de4ea25ca787035cbed50a158bdc200a3776254b
+    _7Z="/mingw64/bin/7z"
+    _7Z_PACKAGE_PREFIX="mingw-w64-x86_64"
+    ;;
+  MINGW64|UCRT64|CLANG64|CLANGARM64)
+    _7Z="7z"
+    _7Z_PACKAGE_PREFIX="${MINGW_PACKAGE_PREFIX}"
+    ;;
+esac
+
 MINGW32_FOLDER="mingw32"
 MINGW32_ARCHIVE="mingw32.7z"
-MINGW32_COMPILER_NAME="MinGW-w64 i686 GCC 11.2"
-MINGW32_PACKAGE_SUFFIX="MinGW32_11.2"
+MINGW32_COMPILER_NAME="MinGW-w64 i686 GCC 11.5"
+MINGW32_PACKAGE_SUFFIX="MinGW32_11.5"
 
 MINGW64_FOLDER="mingw64"
 MINGW64_ARCHIVE="mingw64.7z"
 MINGW64_COMPILER_NAME="MinGW-w64 X86_64 GCC 11.4"
 MINGW64_PACKAGE_SUFFIX="MinGW64_11.4"
 
+GCC_LINUX_X8664_ARCHIVE="gcc-linux-x86-64.7z"
+ALPINE_X8664_ARCHIVE="alpine-minirootfs-x86_64.tar"
+
+GCC_LINUX_AARCH64_ARCHIVE="gcc-linux-aarch64.7z"
+ALPINE_AARCH64_ARCHIVE="alpine-minirootfs-aarch64.tar"
+
 if [[ ${#compilers[@]} -eq 0 ]]; then
   PACKAGE_BASENAME="${PACKAGE_BASENAME}.NoCompiler"
 else
   [[ ${COMPILER_MINGW32} -eq 1 ]] && PACKAGE_BASENAME="${PACKAGE_BASENAME}.${MINGW32_PACKAGE_SUFFIX}"
   [[ ${COMPILER_MINGW64} -eq 1 ]] && PACKAGE_BASENAME="${PACKAGE_BASENAME}.${MINGW64_PACKAGE_SUFFIX}"
+  [[ ${COMPILER_GCC_LINUX_X8664} -eq 1 || ${COMPILER_GCC_LINUX_AARCH64} -eq 1 ]] && PACKAGE_BASENAME="${PACKAGE_BASENAME}.Linux_GCC"
 fi
 
 function fn_print_progress() {
@@ -175,19 +234,14 @@ function fn_print_progress() {
 ## check deps
 
 if [[ ${CHECK_DEPS} -eq 1 ]]; then
-  case "${MSYSTEM}" in
-    MINGW32|MINGW64|UCRT64)
-      compiler=gcc
-      ;;
-    CLANG32|CLANG64|CLANGARM64)
-      compiler=clang
-      ;;
-  esac
   deps=(
-    ${MINGW_PACKAGE_PREFIX}-{$compiler,make,qt5-static,7zip,cmake}
+    ${MINGW_PACKAGE_PREFIX}-{cc,make,qt5-static,cmake}
+    # always use x86 NSIS to display error message of mismatched architecture
     mingw-w64-i686-nsis
+    ${_7Z_PACKAGE_PREFIX}-7zip
     git
   )
+
   for dep in ${deps[@]}; do
     pacman -Q ${dep} &>/dev/null || {
       echo "Missing dependency: ${dep}"
@@ -203,6 +257,22 @@ fi
 if [[ ${COMPILER_MINGW64} -eq 1 && ! -f "${SOURCE_DIR}/assets/${MINGW64_ARCHIVE}" && ! -d "${SOURCE_DIR}/assets/${MINGW64_FOLDER}" ]]; then
   echo "Missing MinGW archive: assets/${MINGW64_ARCHIVE} or MinGW folder: assets/${MINGW64_FOLDER}"
   exit 1
+fi
+if [[ ${COMPILER_GCC_LINUX_X8664} -eq 1 ]]; then
+  if [[ ! -f "${SOURCE_DIR}/assets/${GCC_LINUX_X8664_ARCHIVE}" ]]; then
+    echo "Missing GCC archive: assets/${GCC_LINUX_X8664_ARCHIVE}"
+  fi
+  if [[ ! -f "${SOURCE_DIR}/assets/${ALPINE_X8664_ARCHIVE}" ]]; then
+    echo "Missing Alpine rootfs: assets/${ALPINE_X8664_ARCHIVE}"
+  fi
+fi
+if [[ ${COMPILER_GCC_LINUX_AARCH64} -eq 1 ]]; then
+  if [[ ! -f "${SOURCE_DIR}/assets/${GCC_LINUX_AARCH64_ARCHIVE}" ]]; then
+    echo "Missing GCC archive: assets/${GCC_LINUX_AARCH64_ARCHIVE}"
+  fi
+  if [[ ! -f "${SOURCE_DIR}/assets/${ALPINE_AARCH64_ARCHIVE}" ]]; then
+    echo "Missing Alpine rootfs: assets/${ALPINE_AARCH64_ARCHIVE}"
+  fi
 fi
 if [[ -n "${UCRT}" && ! -f "${UCRT_DIR}/ucrtbase.dll" ]]; then
   echo "Missing Windows SDK, UCRT cannot be included."
@@ -279,22 +349,40 @@ nsis_flags=(
   -DFINALNAME="${SETUP_NAME}"
   -DMINGW32_COMPILER_NAME="${MINGW32_COMPILER_NAME}"
   -DMINGW64_COMPILER_NAME="${MINGW64_COMPILER_NAME}"
-  -DREQUIRED_WINDOWS_BUILD=7600
-  -DREQUIRED_WINDOWS_NAME="Windows 7"
+  -DREQUIRED_WINDOWS_BUILD="${REQUIRED_WINDOWS_BUILD}"
+  -DREQUIRED_WINDOWS_NAME="${REQUIRED_WINDOWS_NAME}"
   -DUSE_MODERN_FONT
 )
 if [[ ${COMPILER_MINGW32} -eq 1 ]]; then
   nsis_flags+=(-DHAVE_MINGW32)
   if [[ ! -d "mingw32" ]]; then
-	[[ -f "${SOURCE_DIR}/assets/${MINGW32_ARCHIVE}" ]] && 7z x "${SOURCE_DIR}/assets/${MINGW32_ARCHIVE}" -o"${PACKAGE_DIR}"
+	[[ -f "${SOURCE_DIR}/assets/${MINGW32_ARCHIVE}" ]] && "${_7Z}" x "${SOURCE_DIR}/assets/${MINGW32_ARCHIVE}" -o"${PACKAGE_DIR}"
 	[[ -d "${SOURCE_DIR}/assets/${MINGW32_FOLDER}" ]] && cp -a --dereference "${SOURCE_DIR}/assets/${MINGW32_FOLDER}" "${PACKAGE_DIR}"
   fi 
 fi
 if [[ ${COMPILER_MINGW64} -eq 1 ]]; then
   nsis_flags+=(-DHAVE_MINGW64)
   if [[ ! -d "mingw64" ]]; then  
-	[[ -f "${SOURCE_DIR}/assets/${MINGW64_ARCHIVE}" ]] && 7z x "${SOURCE_DIR}/assets/${MINGW64_ARCHIVE}" -o"${PACKAGE_DIR}"
+	[[ -f "${SOURCE_DIR}/assets/${MINGW64_ARCHIVE}" ]] && "${_7Z}" x "${SOURCE_DIR}/assets/${MINGW64_ARCHIVE}" -o"${PACKAGE_DIR}"
 	[[ -d "${SOURCE_DIR}/assets/${MINGW64_FOLDER}" ]] && cp -a --dereference "${SOURCE_DIR}/assets/${MINGW64_FOLDER}" "${PACKAGE_DIR}"
+  fi
+fi
+if [[ ${COMPILER_GCC_LINUX_X8664} -eq 1 ]]; then
+  nsis_flags+=(-DHAVE_GCC_LINUX_X8664 -DSTRICT_ARCH_CHECK)
+  if [[ ! -d "gcc-linux-x86_64" ]]; then
+    "${_7Z}" x "${SOURCE_DIR}/assets/${GCC_LINUX_X8664_ARCHIVE}" -o"${PACKAGE_DIR}"
+  fi
+  if [[ ! -d "alpine-minirootfs.tar" ]]; then
+    cp "${SOURCE_DIR}/assets/${ALPINE_X8664_ARCHIVE}" alpine-minirootfs.tar
+  fi
+fi
+if [[ ${COMPILER_GCC_LINUX_AARCH64} -eq 1 ]]; then
+  nsis_flags+=(-DHAVE_GCC_LINUX_AARCH64 -DSTRICT_ARCH_CHECK)
+  if [[ ! -d "gcc-linux-aarch64" ]]; then
+    "${_7Z}" x "${SOURCE_DIR}/assets/${GCC_LINUX_AARCH64_ARCHIVE}" -o"${PACKAGE_DIR}"
+  fi
+  if [[ ! -d "alpine-minirootfs.tar" ]]; then
+    cp "${SOURCE_DIR}/assets/${ALPINE_AARCH64_ARCHIVE}" alpine-minirootfs.tar
   fi
 fi
 if [[ -n "${UCRT}" ]]; then
@@ -307,8 +395,8 @@ fi
 "${NSIS}" "${nsis_flags[@]}" redpanda.nsi
 
 fn_print_progress "Making Portable Package..."
-7z x "${SETUP_NAME}" -o"RedPanda-CPP" -xr'!$PLUGINSDIR' -x"!uninstall.exe"
-7z a -mmt -mx9 -ms=on -mqs=on -mf=BCJ2 "${PORTABLE_NAME}" "RedPanda-CPP"
+"${_7Z}" x "${SETUP_NAME}" -o"RedPanda-CPP" -xr'!$PLUGINSDIR' -x"!uninstall.exe"
+"${_7Z}" a -mmt -mx9 -ms=on -mqs=on -mf=BCJ2 "${PORTABLE_NAME}" "RedPanda-CPP"
 rm -rf "RedPanda-CPP"
 
 mv "${SETUP_NAME}" "${TARGET_DIR}"

@@ -48,7 +48,7 @@ public:
 
 signals:
     void compileStarted();
-    void compileFinished(QString filename);
+    void compileFinished(const QString& filename);
     void compileOutput(const QString& msg);
     void compileIssue(PCompileIssue issue);
     void compileErrorOccured(const QString& reason);
@@ -71,6 +71,7 @@ protected:
     virtual bool prepareForRebuild() = 0;
     virtual bool beforeRunExtraCommand(int idx);
     virtual QStringList getCharsetArgument(const QByteArray& encoding, FileType fileType, bool onlyCheckSyntax);
+    virtual QStringList getCppGccImportStdSources(bool checkSyntax);
     virtual QStringList getCCompileArguments(bool checkSyntax);
     virtual QStringList getCppCompileArguments(bool checkSyntax);
     virtual QStringList getCIncludeArguments();

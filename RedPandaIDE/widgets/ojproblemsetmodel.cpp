@@ -23,7 +23,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMimeData>
-#include "../utils.h"
 #include "../iconsmanager.h"
 #include "../systemconsts.h"
 #include "../settings.h"
@@ -181,8 +180,8 @@ void OJProblemSetModel::loadFromFile(const QString &fileName, int& currentIndex)
         QJsonDocument doc(QJsonDocument::fromJson(content,&error));
         if (error.error!=QJsonParseError::NoError) {
             throw FileError(QObject::tr("Can't parse problem set file '%1':%2")
-                            .arg(fileName)
-                            .arg(error.errorString()));
+                            .arg(fileName,
+                                 error.errorString()));
         }
         beginResetModel();
         QJsonObject obj = doc.object();
@@ -190,7 +189,7 @@ void OJProblemSetModel::loadFromFile(const QString &fileName, int& currentIndex)
         currentIndex = obj["current_index"].toInt(-1);
         mProblemSet.problems.clear();
         QJsonArray problemsArray = obj["problems"].toArray();
-        foreach (const QJsonValue& problemVal, problemsArray) {
+        for (const QJsonValue& problemVal:problemsArray) {
             QJsonObject problemObj = problemVal.toObject();
             POJProblem problem = std::make_shared<OJProblem>();
             problem->name = problemObj["name"].toString();
@@ -203,7 +202,7 @@ void OJProblemSetModel::loadFromFile(const QString &fileName, int& currentIndex)
             problem->description = problemObj["description"].toString();
             problem->answerProgram = problemObj["answer_program"].toString();
             QJsonArray casesArray = problemObj["cases"].toArray();
-            foreach (const QJsonValue& caseVal, casesArray) {
+            for(const QJsonValue& caseVal:casesArray) {
                 QJsonObject caseObj = caseVal.toObject();
                 POJProblemCase problemCase = std::make_shared<OJProblemCase>();
                 problemCase->name = caseObj["name"].toString();

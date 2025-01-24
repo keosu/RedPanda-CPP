@@ -55,13 +55,13 @@ void ShortcutManager::load()
         QMessageBox::critical(nullptr,
                               tr("Read shortcut config failed"),
                               tr("Read shortcut config file '%1' failed:%2")
-                              .arg(filename)
-                              .arg(error.errorString()));
+                              .arg(filename,
+                                   error.errorString()));
         return;
     }
     mShortcuts.clear();
     QJsonArray array = doc.array();
-    foreach (const QJsonValue& value,array) {
+    for (const QJsonValue& value:array) {
         QJsonObject object = value.toObject();
         PEnvironmentShortcut shortcut = std::make_shared<EnvironmentShortcut>();
         shortcut->name = object["name"].toString();
@@ -127,10 +127,10 @@ void ShortcutManager::applyTo(QAction *action)
 {
     PEnvironmentShortcut item = mShortcuts.value(action->objectName(), PEnvironmentShortcut());
     if (item && item->isAction) {
-        action->setShortcut(QKeySequence::fromString(item->shortcut));
+        action->setShortcuts(QKeySequence::listFromString(item->shortcut));
     }
     if (!action->shortcut().isEmpty()){
-        action->setToolTip(action->text()+QString("(%1)").arg(action->shortcut().toString()));
+        action->setToolTip(action->text()+QString("(%1)").arg(QKeySequence::listToString(action->shortcuts())));
     } else {
         action->setToolTip(action->text());
     }

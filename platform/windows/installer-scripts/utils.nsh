@@ -15,39 +15,31 @@ Var /GLOBAL sectionDepTemp
 !macroend
 
 !macro CheckOsArch
-  ; special check for OpenConsole.exe:
-  ; - 32-bit cannot be installed on 64-bit OS
-  ; - x64 can be install on arm64 OS, following general rule
-  !ifdef HAVE_OPENCONSOLE
-    !if "${ARCH}" == "x86"
-      ${If} $osArch != "x86"
+  !ifdef STRICT_ARCH_CHECK
+    ${If} $osArch != "${ARCH}"
+      MessageBox MB_OK|MB_ICONSTOP "$(ErrorStrictArchMismatch)"
+      Abort
+    ${EndIf}
+  !else
+    !if "${ARCH}" == "x64"
+      ${If} $osArch == "x86"
         MessageBox MB_OK|MB_ICONSTOP "$(ErrorArchMismatch)"
         Abort
       ${EndIf}
     !endif
-  !endif
 
-  ; x64 cannot be installed on arm64 prior to Windows 11
-  !if "${ARCH}" == "x64"
-    ${If} $osArch == "arm64"
-    ${AndIfNot} ${AtLeastBuild} 22000
-    ${OrIf} $osArch == "x86"
-      MessageBox MB_OK|MB_ICONSTOP "$(ErrorArchMismatch)"
-      Abort
+    !if "${ARCH}" == "arm64"
+      ${If} $osArch != "arm64"
+        MessageBox MB_OK|MB_ICONSTOP "$(ErrorArchMismatch)"
+        Abort
+      ${EndIf}
+    !endif
+
+    ; warning if not matching
+    ${If} $osArch != "${ARCH}"
+      MessageBox MB_OK|MB_ICONEXCLAMATION "$(WarningArchMismatch)"
     ${EndIf}
   !endif
-
-  !if "${ARCH}" == "arm64"
-    ${If} $osArch != "arm64"
-      MessageBox MB_OK|MB_ICONSTOP "$(ErrorArchMismatch)"
-      Abort
-    ${EndIf}
-  !endif
-
-  ; warning if not matching
-  ${If} $osArch != "${ARCH}"
-    MessageBox MB_OK|MB_ICONEXCLAMATION "$(WarningArchMismatch)"
-  ${EndIf}
 !macroend
 
 !macro CheckOsBuild
@@ -92,9 +84,7 @@ Var /GLOBAL sectionDepTemp
 
 !macro SectionAction_CheckMingw64
   !ifdef HAVE_MINGW64
-    ${If} $osArch == "arm64"
-    ${AndIfNot} ${AtLeastBuild} 22000
-    ${OrIf} $osArch == "x86"
+    ${If} $osArch == "x86"
       !insertmacro DisableSection ${SectionMingw64}
     ${EndIf}
   !endif

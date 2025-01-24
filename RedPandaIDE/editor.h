@@ -126,6 +126,8 @@ public:
 
     explicit Editor(QWidget *parent, const QString& filename,
                     const QByteArray& encoding,
+                    FileType fileType,
+                    const QString& contextFile,
                     Project* pProject, bool isNew,QTabWidget* parentPageControl);
 
     ~Editor();
@@ -150,7 +152,7 @@ public:
     bool save(bool force=false, bool reparse=true);
     bool saveAs(const QString& name="", bool fromProject = false);
     void setFilename(const QString& newName);
-    void activate();
+    void activate(bool focus=true);
 
     QTabWidget* pageControl() noexcept;
     void setPageControl(QTabWidget* newPageControl);
@@ -186,7 +188,7 @@ public:
     void removeBreakpointFocus();
     void modifyBreakpointProperty(int line);
     void setActiveBreakpointFocus(int Line, bool setFocus=true);
-    QString getPreviousWordAtPositionForSuggestion(const QSynedit::BufferCoord& p, bool &hasTypeQualifier);
+    QString getPreviousWordAtPositionForSuggestion(const QSynedit::BufferCoord& p, QSynedit::TokenType &tokenType);
     QString getPreviousWordAtPositionForCompleteFunctionDefinition(const QSynedit::BufferCoord& p);
     void reformat(bool doReparse=true);
     void replaceContent(const QString &newContent, bool doReparse=true);
@@ -249,6 +251,8 @@ public:
     void selectToFileStart() { processCommand(QSynedit::EditCommand::SelFileStart); }
     void selectToFileEnd() { processCommand(QSynedit::EditCommand::SelFileEnd); }
 
+    bool inTab() { return mParentPageControl!=nullptr; }
+
 signals:
     void renamed(const QString& oldName, const QString& newName, bool firstSave);
     void fileSaved(const QString& filename, bool inProject);
@@ -264,6 +268,7 @@ private slots:
     void onEndParsing();
 
 private:
+    void loadContent(const QString& filename);
     void resolveAutoDetectEncodingOption();
     bool isBraceChar(QChar ch);
     bool shouldOpenInReadonly();
@@ -325,6 +330,10 @@ private:
     void cancelHoverLink();
 
     QSize calcCompletionPopupSize();
+    void doSetFileType(FileType newFileType, bool force=false);
+
+    Editor* openFileInContext(const QString& filename);
+    bool needReparse();
 
 private:
     bool mInited;
@@ -352,8 +361,8 @@ private:
     QSet<int> mBookmarkLines;
     int mActiveBreakpointLine;
     PCppParser mParser;
-    std::shared_ptr<CodeCompletionPopup> mCompletionPopup;
-    std::shared_ptr<HeaderCompletionPopup> mHeaderCompletionPopup;
+    CodeCompletionPopup *mCompletionPopup;
+    HeaderCompletionPopup *mHeaderCompletionPopup;
     bool mUseCppSyntax;
     QString mCurrentWord;
     QString mCurrentDebugTipWord;
@@ -380,31 +389,20 @@ private:
     QTimer mTooltipTimer;
     int mHoverModifiedLine;
     int mWheelAccumulatedDelta;
+    bool mCtrlClicking;
+    FileType mFileType;
+    QString mContextFile;
+
     QMap<QString,StatementKind> mIdentCache;
     qint64 mLastFocusOutTime;
 
     static QHash<ParserLanguage,std::weak_ptr<CppParser>> mSharedParsers;
 
-    // QWidget interface
-protected:
-    void wheelEvent(QWheelEvent *event) override;
-    void focusInEvent(QFocusEvent *event) override;
-    void focusOutEvent(QFocusEvent *event) override;
-    void keyPressEvent(QKeyEvent *event) override;
-    void keyReleaseEvent(QKeyEvent *event) override;
-    void mouseMoveEvent(QMouseEvent *event) override;
-
     // SynEdit interface
 protected:
     void onGutterPaint(QPainter &painter, int aLine, int X, int Y) override;
     void onGetEditingAreas(int Line, QSynedit::EditingAreaList &areaList) override;
-
-    // SynEdit interface
-protected:
     bool onGetSpecialLineColors(int Line, QColor &foreground, QColor &backgroundColor) override;
-
-    // SynEdit interface
-protected:
     void onPreparePaintHighlightToken(int line, int aChar, const QString &token, QSynedit::PTokenAttribute attr, QSynedit::FontStyles &style, QColor &foreground, QColor &background) override;
 
     // QObject interface
@@ -428,19 +426,25 @@ public:
 
     quint64 lastFocusOutTime() const;
 
+    FileType fileType() const;
+    void setFileType(FileType newFileType);
+    const QString &contextFile() const;
+    void setContextFile(const QString &newContextFile);
+
 protected:
-    void mousePressEvent(QMouseEvent *event) override;
+    // QWidget interface
+    void wheelEvent(QWheelEvent *event) override;
+    void focusInEvent(QFocusEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *) override;
     void closeEvent(QCloseEvent *event) override;
-
-    // QWidget interface
-protected:
     void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
-
-    // QWidget interface
-protected:
     void resizeEvent(QResizeEvent *event) Q_DECL_OVERRIDE;
 };
 

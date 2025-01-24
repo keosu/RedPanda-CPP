@@ -4,17 +4,17 @@
 <context>
     <name>QObject</name>
     <message>
-        <location filename="qsynedit/exporter/exporter.cpp" line="+128"/>
+        <location filename="qsynedit/exporter/exporter.cpp" line="+140"/>
         <source>Can&apos;t open file &apos;%1&apos; to write!</source>
         <translation>无法写入文件&quot;%1&quot;!</translation>
     </message>
     <message>
-        <location line="+8"/>
+        <location line="+9"/>
         <source>Failed to write data.</source>
         <translation>写入数据失败。</translation>
     </message>
     <message>
-        <location filename="qsynedit/syntaxer/asm.cpp" line="+368"/>
+        <location filename="qsynedit/syntaxer/asm.cpp" line="+369"/>
         <location line="+1"/>
         <location line="+1"/>
         <source>byte swap.</source>
@@ -4293,19 +4293,19 @@
         <translation>无法读取文件&quot;%1&quot;.</translation>
     </message>
     <message>
-        <location line="+39"/>
-        <location line="+123"/>
+        <location line="+38"/>
+        <location line="+126"/>
         <source>Can&apos;t load codec &apos;%1&apos;!</source>
         <translation>无法加载字符编码&quot;%1&quot;!</translation>
     </message>
     <message>
-        <location line="-104"/>
+        <location line="-107"/>
         <source>&apos;%1&apos; is a binaray File!</source>
         <oldsource>This is a binaray File!</oldsource>
         <translation>&apos;%1&apos;是二进制文件！</translation>
     </message>
     <message>
-        <location line="+107"/>
+        <location line="+110"/>
         <source>Can&apos;t open file &apos;%1&apos; for save!</source>
         <translation>无法保存文件&quot;%1&quot;!</translation>
     </message>

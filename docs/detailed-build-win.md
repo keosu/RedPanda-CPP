@@ -2,8 +2,8 @@
 
 | Library + Toolchain \ Target | x86 | x64 | ARM64 |
 | ---------------------------- | --- | --- | ----- |
-| MSYS2 + GNU-based MinGW | ✔️ | ✔️ | ❌ |
-| MSYS2 + LLVM-based MinGW | ✔️ | ✔️ | ✔️ |
+| MSYS2 + GNU-based MinGW | ❌ | ✔️ | ❌ |
+| MSYS2 + LLVM-based MinGW | ❌ | ✔️ | ✔️ |
 | [Windows XP](https://github.com/redpanda-cpp/qtbase-xp) + [MinGW UCRT](https://github.com/redpanda-cpp/mingw-lite) | ✔️ | ✔️ | ❌ |
 | Qt.io + MinGW | ✔️ | ✔️ | ❌ |
 | Qt.io + MSVC | ✔️ | ✔️ | ❌ |
@@ -16,7 +16,8 @@ qmake variables:
   - `OpenConsole.exe` requires ConPTY, which was introduced in Windows 10 1809.
 
 Notes for Windows on ARM:
-- Red Panda C++ can be built for ARM64 ABI only on Windows 11 ARM64, while it is supposed (but not tested) to run on Windows 10 ARM64.
+- Red Panda C++ can be built for ARM64 ABI only on Windows 11 ARM64.
+  - Running on Windows 10 ARM64 is no longer supported. Installers assume x64 emulation is always available. (The native package “Red Panda C++ with LLVM MinGW toolchain” may work.)
   - ARM64EC (“emulation compatible”) host is not supported, i.e., Red Panda C++ cannot be built with ARM64EC toolchain.
   - ARM64EC target is (theoretically) supported, i.e. Red Panda C++ will build ARM64EC binaries if upstream toolchain supports ARM64EC.
 - With the [ARM32 deprecation in Windows 11 Insider Preview Build 25905](https://blogs.windows.com/windows-insider/2023/07/12/announcing-windows-11-insider-preview-build-25905/), ARM32 support will never be added.
@@ -124,7 +125,7 @@ Prerequisites:
 3. Install Qt with vcpkg.
    ```ps1
    $TARGET = "x64-windows-static" # or "x86-windows-static"
-   vcpkg install qt5-base:$TARGET qt5-svg:$TARGET qt5-tools:$TARGET
+   vcpkg install qt5-base:$TARGET qt5-svg:$TARGET qt5-tools:$TARGET qt5-translations:$TARGET
    ```
 
 To build with VS 2019 or later in PowerShell (Core) or Windows PowerShell:

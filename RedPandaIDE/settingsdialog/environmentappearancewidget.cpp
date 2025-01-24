@@ -62,6 +62,7 @@ void EnvironmentAppearanceWidget::doLoad()
             break;
         }
     }
+    ui->chkComboboxWheel->setChecked(pSettings->environment().comboboxWheel());
 }
 
 void EnvironmentAppearanceWidget::doSave()
@@ -83,6 +84,7 @@ void EnvironmentAppearanceWidget::doSave()
     pSettings->environment().setIconZoomFactor(ui->spinZoomFactor->value());
 
     pSettings->environment().setUseCustomIconSet(ui->chkUseCustomIconSet->isChecked());
+    pSettings->environment().setComboboxWheel(ui->chkComboboxWheel->isChecked());
 
     pSettings->environment().save();
     pMainWindow->applySettings();
@@ -107,6 +109,7 @@ void EnvironmentAppearanceWidget::init()
     ui->cbLanguage->addItem(tr("Portuguese"),"pt_BR");
     ui->cbLanguage->addItem(tr("Simplified Chinese"),"zh_CN");
     ui->cbLanguage->addItem(tr("Traditional Chinese"),"zh_TW");
+    ui->cbLanguage->addItem(tr("Russian"),"ru_RU");
     QList<PIconSet> iconSets = pIconsManager->listIconSets();
     foreach(const PIconSet& iconSet, iconSets) {
         ui->cbIconSet->addItem(iconSet->displayName,iconSet->name);

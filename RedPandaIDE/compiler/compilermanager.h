@@ -23,12 +23,6 @@
 #include "../utils.h"
 #include "../common.h"
 
-enum RunProgramFlag {
-    RPF_PAUSE_CONSOLE =     0x0001,
-    RPF_REDIRECT_INPUT =    0x0002,
-    RPF_ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
-};
-
 class Runner;
 class Project;
 class Compiler;
@@ -44,6 +38,7 @@ public:
     explicit CompilerManager(QObject *parent = nullptr);
     CompilerManager(const CompilerManager&)=delete;
     CompilerManager& operator=(const CompilerManager&)=delete;
+    ~CompilerManager();
 
     bool compiling();
     bool backgroundSyntaxChecking();
@@ -82,6 +77,7 @@ public:
 
 signals:
     void signalStopAllRunners();
+    void compileFinished(const QString& filename, bool isSyntaxCheck);
 
 private slots:
     void doRunProblem(const QString& filename, const QString& arguments, const QString& workDir, const QVector<POJProblemCase> &problemCases,
@@ -89,9 +85,9 @@ private slots:
                       );
     void onRunnerTerminated();
     void onRunnerPausing();
-    void onCompileFinished(QString filename);
+    void onCompileFinished(const QString& filename);
     void onCompileIssue(PCompileIssue issue);
-    void onSyntaxCheckFinished(QString filename);
+    void onSyntaxCheckFinished(const QString& filename);
     void onSyntaxCheckIssue(PCompileIssue issue);
 private:
     ProjectCompiler* createProjectCompiler(std::shared_ptr<Project> project);

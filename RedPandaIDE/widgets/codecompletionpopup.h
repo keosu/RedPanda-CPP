@@ -19,6 +19,7 @@
 
 #include <QListView>
 #include <QWidget>
+#include <QStyledItemDelegate>
 #include "parser/cppparser.h"
 #include "codecompletionlistview.h"
 
@@ -44,7 +45,8 @@ enum class CodeCompletionType {
     Namespaces,
     Types,
     Macros,
-    KeywordsOnly
+    KeywordsOnly,
+    LiteralOperators
 };
 
 class CodeCompletionListItemDelegate: public QStyledItemDelegate {
@@ -169,6 +171,8 @@ private:
     void getCompletionListForTypes(const QString &preWord,
                                         const QString& fileName,
                                         int line);
+    void getCompletionListForLiteralOperators(const QString& fileName,
+                                        int line);
     void addKeyword(const QString& keyword);
     bool isIncluded(const QString& fileName);
 private:
@@ -183,7 +187,7 @@ private:
     QSet<QString> mAddedStatements;
     QString mMemberPhrase;
     QString mMemberOperator;
-    QRecursiveMutex mMutex;
+    mutable QRecursiveMutex mMutex;
     std::shared_ptr<QHash<StatementKind, std::shared_ptr<ColorSchemeItem> > > mColors;
     CodeCompletionListItemDelegate* mDelegate;
 

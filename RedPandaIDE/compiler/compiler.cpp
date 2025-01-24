@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "compiler.h"
+#include "compiler/compilerinfo.h"
 #include "utils.h"
 #include "utils/escape.h"
 #include "utils/parsearg.h"
@@ -25,7 +26,6 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QString>
-#include <QTextCodec>
 #include <QTime>
 #include <QApplication>
 #include "../editor.h"
@@ -375,11 +375,11 @@ QStringList Compiler::getCharsetArgument(const QByteArray& encoding,FileType fil
         }
     }
     if ((forceExecUTF8 || compilerSet()->autoAddCharsetParams()) && encoding != ENCODING_ASCII
-            && compilerSet()->compilerType()!=CompilerType::Clang) {
+            && compilerSet()->supportConvertingCharset()) {
         QString encodingName;
         QString execEncodingName;
         QString compilerSetExecCharset = compilerSet()->execCharset();
-        QString systemEncodingName=pCharsetInfoManager->getDefaultSystemEncoding();
+        QString systemEncodingName = pCharsetInfoManager->getDefaultSystemEncoding();
         if (encoding == ENCODING_SYSTEM_DEFAULT) {
             encodingName = systemEncodingName;
         } else if (encoding == ENCODING_UTF8_BOM) {
@@ -395,6 +395,8 @@ QStringList Compiler::getCharsetArgument(const QByteArray& encoding,FileType fil
             execEncodingName = "UTF-8";
         } else if (compilerSetExecCharset == ENCODING_SYSTEM_DEFAULT || compilerSetExecCharset.isEmpty()) {
             execEncodingName = systemEncodingName;
+        } else if (compilerSetExecCharset == ENCODING_OEM_DEFAULT) {
+            execEncodingName = pCharsetInfoManager->getDefaultConsoleEncoding();
         } else {
             execEncodingName = compilerSetExecCharset;
         }
@@ -406,6 +408,20 @@ QStringList Compiler::getCharsetArgument(const QByteArray& encoding,FileType fil
                 "-finput-charset=" + encodingName,
                 "-fexec-charset=" + execEncodingName,
             };
+        }
+    }
+    return result;
+}
+
+QStringList Compiler::getCppGccImportStdSources(bool checkSyntax)
+{
+    QStringList result;
+    if (!checkSyntax && compilerSet()->getCompileOptionValue(CC_CMD_OPT_ENABLE_GCC_IMPORT_STD) == COMPILER_OPTION_ON) {
+        // libstdc++ extends `import std` to C++20
+        // FIXME: use robust method to check C++ standard version
+        const QString &std = compilerSet()->getCompileOptionValue(CC_CMD_OPT_STD);
+        if (std.startsWith("c++2") || std.startsWith("gnu++2")) {
+            result += {"-fsearch-include-path", "bits/std.cc", "bits/std.compat.cc"};
         }
     }
     return result;
@@ -713,6 +729,15 @@ void Compiler::runCommand(const QString &cmd, const QStringList &arguments, cons
     bool compilerErrorUTF8=compilerSet()->isCompilerInfoUsingUTF8();
     bool outputUTF8=compilerSet()->forceUTF8();
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+#ifdef Q_OS_WIN
+    QStringList binDirs=compilerSet()->binDirs();
+    if (!cmdDir.isEmpty())
+        binDirs.insert(0, cmdDir);
+    QString windir = env.value("windir");
+    binDirs.append(windir+"\\system32");
+    binDirs.append(windir);
+    env.insert("PATH",binDirs.join(PATH_SEPARATOR));
+#else
     if (!cmdDir.isEmpty()) {
         QString path = env.value("PATH");
         if (path.isEmpty()) {
@@ -722,7 +747,8 @@ void Compiler::runCommand(const QString &cmd, const QStringList &arguments, cons
         }
         env.insert("PATH",path);
     }
-    if (compilerSet() && compilerSet()->forceEnglishOutput())
+#endif
+    if (compilerSet() && compilerSet()->supportNLS() && compilerSet()->forceEnglishOutput())
         env.insert("LANG","en");
     //env.insert("LDFLAGS","-Wl,--stack,12582912");
     env.insert("LDFLAGS","");

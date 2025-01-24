@@ -3,7 +3,7 @@
 ## Traditional Unix Way (`./configure`–`make`–`make install`)
 
 - Install recent version of GCC (≥ 7) or Clang (≥ 6) that supports C++17.
-- Install Qt 5.15 Base, SVG and Tools modules, including both libraries and development files.
+- Install Qt 5.15 or 6.8+ Base, SVG and Tools modules, including both libraries and development files.
 - Optionally install fcitx5-qt for building with static Qt library.
 - Install astyle for code formatting in Red Panda C++.
 
@@ -23,15 +23,17 @@
    ```
 
 qmake variables:
-- `PREFIX`: default to `/usr/local`. It should be set to `/usr` when packaging.
-- `LIBEXECDIR`: directory for auxiliary executables, default to `$PREFIX/libexec`. Arch Linux uses `/usr/lib`.
-- `LINUX_STATIC_IME_PLUGIN=ON` (make phase): link to static ime plugin. Recommended for building with static version of Qt; **DO NOT** set for dynamic version of Qt.
+- `PREFIX`: where `$MAKE install` installs files to.
+  - Red Panda C++ itself is not affected by `PREFIX`, because it internally uses relative path.
+  - `.desktop` file is affected by `PREFIX`.
+- `LIBEXECDIR`: directory for auxiliary executables, RELATIVE TO `PREFIX`.
+  - Arch Linux uses `lib`.
 
 ### xmake-based Build Steps
 
 1. Configure:
    ```bash
-   xmake f -p linux -a x86_64 -m release --qt=/usr --prefix=/usr/local
+   xmake f -p linux -a x86_64 -m release --qt=/usr
    ```
 2. Build:
    ```bash
@@ -39,7 +41,7 @@ qmake variables:
    ```
 3. Install:
    ```bash
-   sudo xmake install --root -o /  # `-o ...` imitates `DESTDIR=...` in `make install`
+   sudo xmake install --root -o /usr/local
    ```
 
 Hint: `xmake f --help` for more options.

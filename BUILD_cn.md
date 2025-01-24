@@ -1,6 +1,6 @@
 ﻿# 通用开发说明
 
-小熊猫C++ 需要 Qt 5.15。
+小熊猫C++ 需要 Qt 5.15 或 6.8+。
 
 推荐开发环境：
 1. Visual Studio Code。
@@ -27,21 +27,20 @@
 
 | 库 + 工具链 \ 目标 | x86 | x64 | ARM64 |
 | ------------------ | --- | --- | ----- |
-| MSYS2 + 基于 GNU 的 MinGW | ✔️ | ✔️ | ❌ |
-| MSYS2 + 基于 LLVM 的 MinGW | ✔️ | ✔️ | ✔️ |
+| MSYS2 + 基于 GNU 的 MinGW | ❌ | ✔️ | ❌ |
+| MSYS2 + 基于 LLVM 的 MinGW | ❌ | ✔️ | ✔️ |
 | [Windows NT 5.x](https://github.com/redpanda-cpp/qtbase-xp) + [MinGW Lite](https://github.com/redpanda-cpp/mingw-lite) | ✔️ | ✔️ | ❌ |
 
 另请参阅[详细构建指南——Windows](./docs/detailed-build-win-cn.md)。
 
 ## MSYS2 的 Qt 库 + MinGW 工具链（推荐）
 
-小熊猫C++ 应该能在 MSYS2 的 MinGW 工具链上构建，包括 3 个基于 GNU 的环境（MINGW32、MINGW64、UCRT64）中的 GCC 和 Clang，以及 3 个基于 LLVM 的环境（CLANG32、CLANG64、CLANGARM64）中的 Clang，关于环境的详情可参考 [MSYS2 的文档](https://www.msys2.org/docs/environments/)。以下几个工具链测试较充分：
-- MINGW32 GCC，
+小熊猫C++ 应该能在 MSYS2 的 64 位 MinGW 工具链上构建，包括基于 GNU 的环境（MINGW64、UCRT64）中的 GCC 和 Clang，以及基于 LLVM 的环境（CLANG64、CLANGARM64）中的 Clang，关于环境的详情可参考 [MSYS2 的文档](https://www.msys2.org/docs/environments/)。以下几个工具链测试较充分：
 - MINGW64 GCC，
 - UCRT64 GCC（x64 推荐），
 - CLANGARM64 Clang（ARM64 唯一可用且推荐的工具链）。
 
-小熊猫C++ 官方版本使用 MINGW32 GCC 和 MINGW64 GCC 构建。
+小熊猫C++ 官方版本使用 MINGW32 GCC（已归档）和 MINGW64 GCC 构建。
 
 前置条件：
 
@@ -50,7 +49,7 @@
 2. 在所选环境中安装工具链、Qt 5 库、其他所需工具：
    ```bash
    pacman -S \
-     $MINGW_PACKAGE_PREFIX-{toolchain,qt5-static,7zip,cmake} \
+     $MINGW_PACKAGE_PREFIX-{cc,make,qt5-static,7zip,cmake} \
      mingw-w64-i686-nsis \
      git curl
    ```
@@ -74,67 +73,36 @@
 `build-mingw.sh` 的额外参数：
 - `--mingw32`：把 `assets/mingw32.7z` 添加到包中。
 - `--mingw64`：把 `assets/mingw64.7z` 添加到包中。
-- `--mingw`：`--mingw32`（x86 程序）或 `--mingw64`（x64 程序）的别名。
+- `--mingw`：`--mingw64`（x64 程序）的别名。
+- `--gcc-linux-x86-64`：把 `assets/gcc-linux-x86-64.7z` 和 `assets/alpine-minirootfs-x86_64.tar` 添加到包中。
+- `--gcc-linux-aarch64`：把 `assets/gcc-linux-aarch64.7z` 和 `assets/alpine-minirootfs-aarch64.tar` 添加到包中。
 - `--ucrt <build>`：把 Windows SDK 附带的 UCRT 运行时添加到包中。例如 `--ucrt 22621` 表示 Windows 11 SDK 22H2。
 
 ## 用于 Windows NT 5.x 的 Qt 库 + MinGW Lite 工具链
 
 `build-xp.sh` 脚本和 `build-mingw.sh` 类似，但是工具链由 Qt 库提供。
 
-前置条件：
+本机构建前置条件：
 
 0. Windows 10 x64 或更高版本。
 1. 安装 MSYS2。
-2. 安装所需工具：
-   ```bash
-   pacman -S \
-     mingw-w64-x86_64-{7zip,cmake} \
-     mingw-w64-i686-nsis \
-     git curl
-   ```
-3. 下载 [Windows XP 的 Qt 库](https://github.com/redpanda-cpp/qtbase-xp)并解压到 `C:/Qt`。
-   - 目录结构应该如下：
-     ```
-     C:
-     └─ Qt
-        └─ 5.15.13+redpanda1
-           ├─ mingw141_32-msvcrt
-           │  ├─ bin
-           │  │  ├─ gcc.exe
-           │  │  ├─ mingw32-make.exe
-           │  │  └─ qmake.exe
-           │  ├─ include
-           │  ├─ lib
-           │  └─ ...
-           └─ mingw141_64-msvcrt
-              ├─ bin
-              │  ├─ gcc.exe
-              │  ├─ mingw32-make.exe
-              │  └─ qmake.exe
-              ├─ include
-              ├─ lib
-              └─ ...
-     ```
-   - 也可以从源代码自行构建 Qt 并在构建时指定 `--qt` 参数。
 
-要构建此项目，启动 MSYS2 环境，然后运行
+要进行本机构建，启动 MSYS2 环境，然后运行
 ```bash
 ./packages/msys/build-xp.sh -p 32-msvcrt
 ```
 
-此脚本除了接受 `build-mingw.sh` 的参数外，还接受以下参数：
-- `-p|--profile <profile>`：（必需）MinGW Lite 和 Qt 库的编译配置。可用的配置有 `64-ucrt`、`32-ucrt`、`64-msvcrt`、`32-msvcrt`、`32-win2000`。
-- `--qt <dir>`：指定 Qt 库目录。例如 `--qt /d/myqt-32`。
+要进行交叉构建，运行
+```bash
+podman run -it --rm -v $PWD:/mnt -w /mnt docker.io/amd64/ubuntu:24.04
 
-  目录结构应该如下：
-  ```
-  D:
-  └─ myqt-32
-     ├─ bin
-     ├─ include
-     ├─ lib
-     └─ ...
-  ```
+# 在容器内
+export MIRROR=mirrors.ustc.edu.cn  # 根据需要设置镜像站
+./packages/xmingw/build-xp.sh -p 32-msvcrt
+```
+
+此脚本除了接受 `build-mingw.sh` 的参数外，还接受以下参数：
+- `-p|--profile <profile>`：（必需）MinGW Lite 和 Qt 库的编译配置。可用的配置有 `64-ucrt`、`32-ucrt`、`64-msvcrt`、`32-msvcrt`。
 
 # Linux
 
@@ -195,10 +163,10 @@ podman run --rm -v $PWD:/mnt -w /mnt docker.io/archlinux:latest ./packages/archl
 ## Linux AppImage
 
 ```bash
-podman run --rm -v $PWD:/mnt -w /mnt quay.io/redpanda-cpp/appimage-builder-x86_64:20240304.0 ./packages/appimage/01-in-docker.sh
+podman run --rm -v $PWD:/mnt -w /mnt ghcr.io/redpanda-cpp/appimage-builder-x86_64:20241204.0 ./packages/appimage/01-in-docker.sh
 ```
 
-Dockerfile 位于 [redpanda-cpp/appimage-builder](https://github.com/redpanda-cpp/appimage-builder)。可用架构：`x86_64`、`aarch64`、`riscv64`。
+Dockerfile 位于 [redpanda-cpp/appimage-builder](https://github.com/redpanda-cpp/appimage-builder)。可用架构：`x86_64`、`aarch64`、`riscv64`、`loong64`、`i686`。
 
 # macOS
 
@@ -206,31 +174,19 @@ Dockerfile 位于 [redpanda-cpp/appimage-builder](https://github.com/redpanda-cp
 
 前置条件：
 
-0. macOS 10.13 或更高版本。
+0. 近期满足 [Qt 5](https://doc.qt.io/qt-5/macos.html) 或 [Qt 6](https://doc.qt.io/qt-6/macos.html) 要求的 macOS 版本。
 1. 安装 Xcode 命令行工具：
-   ```bash
+   ```zsh
    xcode-select --install
    ```
 2. 用 [Qt.io](https://www.qt.io/download-qt-installer-oss) 或[镜像站](https://mirrors.sjtug.sjtu.edu.cn/docs/qt)的在线安装器安装 Qt。
-   - 选中 Qt 库（“Qt” 组下的 “Qt 5.15.2” 小组，勾选 “macOS”）。
+   - 选中 Qt 库（“Qt” 组下的 “Qt 5.15.2” 或 “Qt 6.8.0” 小组，勾选 “macOS”）。
 
-构建：
+要构建此项目，执行下列命令之一：
 
-1. 设置相关变量：
-   ```bash
-   SRC_DIR="~/redpanda-src"
-   BUILD_DIR="~/redpanda-build"
-   INSTALL_DIR="~/redpanda-pkg"
-   ```
-2. 定位到构建目录：
-   ```bash
-   rm -rf "$BUILD_DIR" # 根据需要进行全新构建
-   mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
-   ```
-3. 配置、构建、安装：
-   ```bash
-   ~/Qt/5.15.2/clang_64/bin/qmake PREFIX="$INSTALL_DIR" "$SRC_DIR/Red_Panda_CPP.pro"
-   make -j$(sysctl -n hw.logicalcpu)
-   make install
-   ~/Qt/5.15.2/clang_64/bin/macdeployqt "$INSTALL_DIR/bin/RedPandaIDE.app"
-   ```
+```zsh
+./packages/macos/build.sh -a x86_64 --qt-version 5.15.2
+./packages/macos/build.sh -a x86_64 --qt-version 6.8.0
+./packages/macos/build.sh -a arm64 --qt-version 6.8.0
+./packages/macos/build.sh -a universal --qt-version 6.8.0
+```

@@ -18,12 +18,12 @@
 #include "qt_utils/utils.h"
 #include <QDataStream>
 #include <QFile>
-#include <QTextCodec>
 #include <QTextStream>
 #include <QMutexLocker>
 #include <stdexcept>
 #include <QMessageBox>
 #include <cmath>
+#include <optional>
 #include "qt_utils/charsetinfo.h"
 #include <QDateTime>
 #include <QDebug>
@@ -54,7 +54,7 @@ static void listIndexOutOfBounds(int index) {
 
 
 
-int Document::parenthesisLevel(int line)
+int Document::parenthesisLevel(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line < mLines.size()) {
@@ -63,7 +63,7 @@ int Document::parenthesisLevel(int line)
         return 0;
 }
 
-int Document::bracketLevel(int line)
+int Document::bracketLevel(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line < mLines.size()) {
@@ -72,7 +72,7 @@ int Document::bracketLevel(int line)
         return 0;
 }
 
-int Document::braceLevel(int line)
+int Document::braceLevel(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line < mLines.size()) {
@@ -81,7 +81,7 @@ int Document::braceLevel(int line)
         return 0;
 }
 
-int Document::lineWidth(int line)
+int Document::lineWidth(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line < mLines.size()) {
@@ -92,7 +92,7 @@ int Document::lineWidth(int line)
         return 0;
 }
 
-int Document::lineWidth(int line, const QString &newText)
+int Document::lineWidth(int line, const QString &newText) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line >= mLines.size())
@@ -105,7 +105,7 @@ int Document::lineWidth(int line, const QString &newText)
     }
 }
 
-int Document::blockLevel(int line)
+int Document::blockLevel(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line < mLines.size()) {
@@ -114,7 +114,7 @@ int Document::blockLevel(int line)
         return 0;
 }
 
-int Document::blockStarted(int line)
+int Document::blockStarted(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line < mLines.size()) {
@@ -123,7 +123,7 @@ int Document::blockStarted(int line)
         return 0;
 }
 
-int Document::blockEnded(int line)
+int Document::blockEnded(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line < mLines.size()) {
@@ -135,7 +135,7 @@ int Document::blockEnded(int line)
         return 0;
 }
 
-int Document::maxLineWidth() {
+int Document::maxLineWidth() const {
     QMutexLocker locker(&mMutex);
     if (mIndexOfLongestLine >= 0) {
         return mLines[mIndexOfLongestLine]->width();
@@ -158,7 +158,7 @@ QString Document::lineBreak() const
     return "\n";
 }
 
-SyntaxState Document::getSyntaxState(int line)
+SyntaxState Document::getSyntaxState(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line < mLines.size()) {
@@ -189,7 +189,7 @@ void Document::addItem(const QString &s)
     endUpdate();
 }
 
-bool Document::getAppendNewLineAtEOF()
+bool Document::getAppendNewLineAtEOF() const
 {
     QMutexLocker locker(&mMutex);
     return mAppendNewLineAtEOF;
@@ -210,7 +210,7 @@ void Document::setSyntaxState(int line, const SyntaxState& state)
     mLines[line]->setSyntaxState(state);
 }
 
-QString Document::getLine(int line)
+QString Document::getLine(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=mLines.count()) {
@@ -219,7 +219,7 @@ QString Document::getLine(int line)
     return mLines[line]->lineText();
 }
 
-int Document::getLineGlyphsCount(int line)
+int Document::getLineGlyphsCount(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=mLines.count()) {
@@ -237,13 +237,13 @@ int Document::getLineGlyphsCount(int line)
 //     return mLines[index]->glyphStartCharList();
 // }
 
-int Document::count()
+int Document::count() const
 {
     QMutexLocker locker(&mMutex);
     return mLines.count();
 }
 
-QString Document::text()
+QString Document::text() const
 {
     QMutexLocker locker(&mMutex);
     return getTextStr();
@@ -274,7 +274,7 @@ void Document::setContents(const QStringList &text)
     }
 }
 
-QStringList Document::contents()
+QStringList Document::contents() const
 {
     QMutexLocker locker(&mMutex);
     QStringList result;
@@ -332,7 +332,7 @@ void Document::addLines(const QStringList &strings)
     }
 }
 
-int Document::getTextLength()
+int Document::getTextLength() const
 {
     QMutexLocker locker(&mMutex);
     int Result = 0;
@@ -452,7 +452,8 @@ void Document::putLine(int index, const QString &s, bool notify) {
         if (index<0 || index>=mLines.count()) {
             listIndexOutOfBounds(index);
         }
-        beginUpdate();
+        if (notify)
+            beginUpdate();
         mLines[index]->setLineText(s);
         if (mIndexOfLongestLine == index) {
             // width is invalidated, so we must recalculate longest line
@@ -460,7 +461,8 @@ void Document::putLine(int index, const QString &s, bool notify) {
         }
         if (notify)
             emit putted(index);
-        endUpdate();
+        if (notify)
+            endUpdate();
     }
 }
 
@@ -496,12 +498,11 @@ void Document::insertLines(int index, int numLines)
 
 
 bool Document::tryLoadFileByEncoding(QByteArray encodingName, QFile& file) {
-    QTextCodec* codec = QTextCodec::codecForName(encodingName);
-    if (!codec)
+    TextDecoder decoder(encodingName);
+    if (!decoder.isValid())
         return false;
     file.reset();
     internalClear();
-    QTextCodec::ConverterState state;
     while (true) {
         if (file.atEnd()){
             break;
@@ -514,10 +515,9 @@ bool Document::tryLoadFileByEncoding(QByteArray encodingName, QFile& file) {
         } else if (line.endsWith("\n")){
             line.remove(line.length()-1,1);
         }
-        QString newLine = codec->toUnicode(line.constData(),line.length(),&state);
-        if (state.invalidChars>0) {
+        auto [ok, newLine] = decoder.decode(line);
+        if (!ok) {
             return false;
-            break;
         }
         addItem(newLine);
     }
@@ -526,46 +526,46 @@ bool Document::tryLoadFileByEncoding(QByteArray encodingName, QFile& file) {
 
 void Document::loadUTF16BOMFile(QFile &file)
 {
-    QTextCodec* codec=QTextCodec::codecForName(ENCODING_UTF16);
-    if (!codec)
+    TextDecoder decoder = TextDecoder::decoderForUtf16();
+    if (!decoder.isValid())
         return;
     file.reset();
     internalClear();
     QByteArray buf = file.readAll();
     if (buf.length()<2)
         return;
-    QString text = codec->toUnicode(buf.mid(2));
+    QString text = decoder.decodeUnchecked(buf.mid(2));
     this->setText(text);
 }
 
 void Document::loadUTF32BOMFile(QFile &file)
 {
-    QTextCodec* codec=QTextCodec::codecForName(ENCODING_UTF32);
-    if (!codec)
+    TextDecoder decoder = TextDecoder::decoderForUtf32();
+    if (!decoder.isValid())
         return;
     file.reset();
     internalClear();
     QByteArray buf = file.readAll();
     if (buf.length()<4)
         return;
-    QString text = codec->toUnicode(buf.mid(4));
+    QString text = decoder.decodeUnchecked(buf.mid(4));
     this->setText(text);
 }
 
-void Document::saveUTF16File(QFile &file, QTextCodec* codec)
+void Document::saveUTF16File(QFile &file, TextEncoder &encoder)
 {
-    if (!codec)
+    if (!encoder.isValid())
         return;
     QString text=getTextStr();
-    file.write(codec->fromUnicode(text));
+    file.write(encoder.encodeUnchecked(text));
 }
 
-void Document::saveUTF32File(QFile &file, QTextCodec* codec)
+void Document::saveUTF32File(QFile &file, TextEncoder &encoder)
 {
-    if (!codec)
+    if (!encoder.isValid())
         return;
     QString text=getTextStr();
-    file.write(codec->fromUnicode(text));
+    file.write(encoder.encodeUnchecked(text));
 }
 
 void Document::setTabSize(int newTabSize)
@@ -604,15 +604,14 @@ void Document::loadFromFile(const QString& filename, const QByteArray& encoding,
             return;
         }
         QByteArray line = file.readLine();
-        QTextCodec* codec;
-        QTextCodec::ConverterState state;
+        std::optional<TextDecoder> decoder;
         bool needReread = false;
         bool allAscii = true;
         //test for BOM
         if ((line.length()>=3) && ((unsigned char)line[0]==0xEF) && ((unsigned char)line[1]==0xBB) && ((unsigned char)line[2]==0xBF) ) {
             realEncoding = ENCODING_UTF8_BOM;
             line = line.mid(3);
-            codec = QTextCodec::codecForName(ENCODING_UTF8);
+            decoder = TextDecoder::decoderForUtf8();
         } else if ((line.length()>=4) && ((unsigned char)line[0]==0xFF) && ((unsigned char)line[1]==0xFE)
                    && ((unsigned char)line[2]==0x00)
                    && ((unsigned char)line[3]==0x00)) {
@@ -625,9 +624,9 @@ void Document::loadFromFile(const QString& filename, const QByteArray& encoding,
             return;
         } else {
             realEncoding = ENCODING_UTF8;
-            codec = QTextCodec::codecForName(ENCODING_UTF8);
+            decoder = TextDecoder::decoderForUtf8();
         }
-        if (!codec)
+        if (!decoder.has_value())
             throw FileError(tr("Can't load codec '%1'!").arg(QString(realEncoding)));
         if (line.endsWith("\r\n")) {
             mNewlineType = NewlineType::Windows;
@@ -654,8 +653,8 @@ void Document::loadFromFile(const QString& filename, const QByteArray& encoding,
             if (allAscii) {
                 addItem(QString::fromLatin1(line));
             } else {
-                QString newLine = codec->toUnicode(line.constData(),line.length(),&state);
-                if (state.invalidChars>0) {
+                auto [ok, newLine] = decoder->decode(line);
+                if (!ok) {
                     needReread = true;
                     break;
                 }
@@ -701,13 +700,16 @@ void Document::loadFromFile(const QString& filename, const QByteArray& encoding,
         realEncoding = pCharsetInfoManager->getDefaultSystemEncoding();
     }
     file.reset();
-    QTextStream textStream(&file);
+    QByteArray data = file.readAll();
+    QString text;
+    QTextStream textStream(&text);
     if (realEncoding == ENCODING_UTF8_BOM) {
         textStream.setAutoDetectUnicode(true);
-        textStream.setCodec(ENCODING_UTF8);
+        text = QString::fromUtf8(data);
     } else {
         textStream.setAutoDetectUnicode(false);
-        textStream.setCodec(realEncoding);
+        TextDecoder decoder(realEncoding);
+        text = decoder.decodeUnchecked(data);
     }
     QString line;
     internalClear();
@@ -729,28 +731,28 @@ void Document::saveToFile(QFile &file, const QByteArray& encoding,
                                    const QByteArray& defaultEncoding, QByteArray& realEncoding)
 {
     QMutexLocker locker(&mMutex);
-    QTextCodec* codec;
+    std::optional<TextEncoder> encoder;
     realEncoding = encoding;
     QString codecName = realEncoding;
     if (realEncoding == ENCODING_UTF16_BOM || realEncoding == ENCODING_UTF16) {
-        codec = QTextCodec::codecForName(ENCODING_UTF16);
+        encoder = TextEncoder::encoderForUtf16();
         codecName = ENCODING_UTF16;
     } else if (realEncoding == ENCODING_UTF32_BOM || realEncoding == ENCODING_UTF32) {
-        codec = QTextCodec::codecForName(ENCODING_UTF32);
+        encoder = TextEncoder::encoderForUtf32();
         codecName = ENCODING_UTF32;
     } else if (realEncoding == ENCODING_UTF8_BOM) {
-        codec = QTextCodec::codecForName(ENCODING_UTF8);
+        encoder = TextEncoder::encoderForUtf8();
         codecName = ENCODING_UTF8;
     } else if (realEncoding == ENCODING_SYSTEM_DEFAULT) {
-        codec = QTextCodec::codecForLocale();
+        encoder = TextEncoder::encoderForSystem();
         codecName = realEncoding;
     } else if (realEncoding == ENCODING_AUTO_DETECT) {
-        codec = QTextCodec::codecForName(defaultEncoding);
+        encoder = TextEncoder(defaultEncoding);
         codecName = defaultEncoding;
     } else {
-        codec = QTextCodec::codecForName(realEncoding);
+        encoder = TextEncoder(realEncoding);
     }
-    if (!codec)
+    if (!encoder.has_value() || !encoder->isValid())
         throw FileError(tr("Can't load codec '%1'!").arg(codecName));
 
     if (!file.open(QFile::WriteOnly | QFile::Truncate))
@@ -758,10 +760,10 @@ void Document::saveToFile(QFile &file, const QByteArray& encoding,
     if (mLines.isEmpty())
         return;
     if (realEncoding == ENCODING_UTF16) {
-        saveUTF16File(file,codec);
+        saveUTF16File(file, encoder.value());
         return;
     } else if (realEncoding == ENCODING_UTF32) {
-        saveUTF32File(file,codec);
+        saveUTF32File(file, encoder.value());
         return;
     } if (realEncoding == ENCODING_UTF8_BOM) {
         file.putChar(0xEF);
@@ -772,7 +774,7 @@ void Document::saveToFile(QFile &file, const QByteArray& encoding,
     QByteArray data;
     for (PDocumentLine& line:mLines) {
         QString text = line->lineText()+lineBreak();
-        data = codec->fromUnicode(text);
+        data = encoder->encodeUnchecked(text);
         if (allAscii) {
             allAscii = (data==text.toLatin1());
         }
@@ -782,21 +784,21 @@ void Document::saveToFile(QFile &file, const QByteArray& encoding,
     if (allAscii) {
         realEncoding = ENCODING_ASCII;
     } else if (realEncoding == ENCODING_SYSTEM_DEFAULT) {
-        if (QString(codec->name()).compare("System",Qt::CaseInsensitive)==0) {
+        if (encoder->name().compare("System",Qt::CaseInsensitive)==0) {
             realEncoding = pCharsetInfoManager->getDefaultSystemEncoding();
         } else {
-            realEncoding = codec->name();
+            realEncoding = encoder->name();
         }
     }
 }
 
-QString Document::glyph(int line, int glyphIdx)
+QString Document::glyph(int line, int glyphIdx) const
 {
     QMutexLocker locker(&mMutex);
     return mLines[line]->glyph(glyphIdx);
 }
 
-QString Document::glyphAt(int line, int charPos)
+QString Document::glyphAt(int line, int charPos) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -806,7 +808,7 @@ QString Document::glyphAt(int line, int charPos)
     return mLines[line]->glyph(glyphIdx);
 }
 
-int Document::charToGlyphStartChar(int line, int charPos)
+int Document::charToGlyphStartChar(int line, int charPos) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -889,7 +891,7 @@ int GlyphCalculator::stringWidth(const QString &str, int left, const QFontMetric
     return right - left;
 }
 
-int Document::glyphCount(int line)
+int Document::glyphCount(int line) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -897,7 +899,7 @@ int Document::glyphCount(int line)
     return mLines[line]->glyphsCount();
 }
 
-int Document::glyphStartChar(int line, int glyphIdx)
+int Document::glyphStartChar(int line, int glyphIdx) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -905,7 +907,7 @@ int Document::glyphStartChar(int line, int glyphIdx)
     return mLines[line]->glyphStartChar(glyphIdx);
 }
 
-int Document::glyphLength(int line, int glyphIdx)
+int Document::glyphLength(int line, int glyphIdx) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -913,7 +915,7 @@ int Document::glyphLength(int line, int glyphIdx)
     return mLines[line]->glyphLength(glyphIdx);
 }
 
-int Document::glyphStartPostion(int line, int glyphIdx)
+int Document::glyphStartPostion(int line, int glyphIdx) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -921,7 +923,7 @@ int Document::glyphStartPostion(int line, int glyphIdx)
     return mLines[line]->glyphStartPosition(glyphIdx);
 }
 
-int Document::glyphWidth(int line, int glyphIdx)
+int Document::glyphWidth(int line, int glyphIdx) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -929,7 +931,7 @@ int Document::glyphWidth(int line, int glyphIdx)
     return mLines[line]->glyphWidth(glyphIdx);
 }
 
-int Document::charToGlyphIndex(int line, int charIdx)
+int Document::charToGlyphIndex(int line, int charIdx) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -974,7 +976,7 @@ QList<int> GlyphCalculator::calcGlyphPositionList(const QString &lineText, const
     return glyphPostionList;
 }
 
-int Document::xposToGlyphIndex(int line, int xpos)
+int Document::xposToGlyphIndex(int line, int xpos) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -996,7 +998,7 @@ int Document::xposToGlyphIndex(int strWidth, QList<int> glyphPositionList, int x
     // return glyphPositionList.length()-1;
 }
 
-int Document::charToGlyphStartPosition(int line, int charPos)
+int Document::charToGlyphStartPosition(int line, int charPos) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -1006,7 +1008,7 @@ int Document::charToGlyphStartPosition(int line, int charPos)
     return mLines[line]->glyphStartPosition(glyphIdx);
 }
 
-int Document::xposToGlyphStartChar(int line, int xpos)
+int Document::xposToGlyphStartChar(int line, int xpos) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -1016,7 +1018,7 @@ int Document::xposToGlyphStartChar(int line, int xpos)
     return mLines[line]->glyphStartChar(glyphIdx);
 }
 
-int Document::charToGlyphStartPosition(int line, const QString newStr, int charPos)
+int Document::charToGlyphStartPosition(int line, const QString newStr, int charPos) const
 {
     QMutexLocker locker(&mMutex);
     if (line>=0 && line<count() && mLines[line]->lineText() == newStr) {
@@ -1033,7 +1035,7 @@ int Document::charToGlyphStartPosition(int line, const QString newStr, int charP
     }
 }
 
-int Document::xposToGlyphStartChar(int line, const QString newStr, int xpos)
+int Document::xposToGlyphStartChar(int line, const QString newStr, int xpos) const
 {
     QMutexLocker locker(&mMutex);
     if (line<0 || line>=count())
@@ -1233,7 +1235,7 @@ int Document::getLineWidth(int line)
     return mLines[line]->mWidth;
 }
 
-NewlineType Document::getNewlineType()
+NewlineType Document::getNewlineType() const
 {
     QMutexLocker locker(&mMutex);
     return mNewlineType;
@@ -1245,7 +1247,7 @@ void Document::setNewlineType(const NewlineType &fileEndingType)
     mNewlineType = fileEndingType;
 }
 
-bool Document::empty()
+bool Document::empty() const
 {
     QMutexLocker locker(&mMutex);
     return mLines.count()==0;

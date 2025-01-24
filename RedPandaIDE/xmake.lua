@@ -4,7 +4,7 @@ target("RedPandaIDE")
     add_rules("qt.widgetapp", "qt.ts")
 
     add_deps("redpanda_qt_utils", "qsynedit")
-    add_frameworks("QtNetwork", "QtPrintSupport", "QtSvg")
+    add_frameworks("QtNetwork", "QtPrintSupport", "QtSvg", "QtXml")
     add_includedirs(".")
 
     -- defines
@@ -34,7 +34,6 @@ target("RedPandaIDE")
         "autolinkmanager.cpp",
         "colorscheme.cpp",
         "customfileiconprovider.cpp",
-        "main.cpp",
         "projectoptions.cpp",
         "settings.cpp",
         "syntaxermanager.cpp",
@@ -65,6 +64,7 @@ target("RedPandaIDE")
         "editor",
         "editorlist",
         "iconsmanager",
+        "main",
         "project",
         "projecttemplate",
         "shortcutmanager",
@@ -88,6 +88,8 @@ target("RedPandaIDE")
         -- parser
         "parser/cppparser",
         "parser/statementmodel",
+        -- problems
+        "problems/competitivecompenionhandler",
         -- settings dialog
         "settingsdialog/settingswidget",
         -- widgets
@@ -194,9 +196,9 @@ target("RedPandaIDE")
     if has_config("lua-addon") then
         add_deps("lua")
         add_files(
-            "addon/api.cpp",
-            "addon/executor.cpp",
-            "addon/runtime.cpp")
+            "addon/luaapi.cpp",
+            "addon/luaexecutor.cpp",
+            "addon/luaruntime.cpp")
         add_links("lua")
     end
 
@@ -226,19 +228,9 @@ target("RedPandaIDE")
 
     -- libs
 
-    if is_plat("windows") then
-        add_links("redpanda_qt_utils", "qsynedit")  -- xmake 2.8.6 workaround
-    else
-        add_linkgroups("redpanda_qt_utils", "qsynedit", {whole = true})
-    end
+    add_links("redpanda_qt_utils", "qsynedit")
     if is_os("windows") then
         add_links("psapi", "shlwapi")
-    end
-
-    -- install
-
-    if is_xdg() then
-        on_install(install_bin)
     end
 
 target("test-escape")

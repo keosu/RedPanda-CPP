@@ -18,7 +18,6 @@
 #include "compilermanager.h"
 #include <QFile>
 #include <QFileInfo>
-#include <QTextCodec>
 
 StdinCompiler::StdinCompiler(const QString &filename,const QByteArray& encoding, const QString& content, bool onlyCheckSyntax):
     Compiler(filename, onlyCheckSyntax),
@@ -53,7 +52,8 @@ bool StdinCompiler::prepareForCompile()
         strFileType = "C";
         mCompiler = compilerSet()->CCompiler();
         break;
-    case FileType::GAS:
+    case FileType::ATTASM:
+    case FileType::INTELASM:
         mArguments += {"-x", "assembler", "-"};
         mArguments += getCCompileArguments(mOnlyCheckSyntax);
         mArguments += getCIncludeArguments();
@@ -62,8 +62,7 @@ bool StdinCompiler::prepareForCompile()
         mCompiler = compilerSet()->CCompiler();
         break;
     case FileType::CppSource:
-    case FileType::CppHeader:
-    case FileType::CHeader:
+    case FileType::CCppHeader:
         mArguments += {"-x", "c++", "-"};
         mArguments += getCppCompileArguments(mOnlyCheckSyntax);
         mArguments += getCppIncludeArguments();
@@ -86,7 +85,7 @@ bool StdinCompiler::prepareForCompile()
 
     log(tr("Processing %1 source file:").arg(strFileType));
     log("------------------");
-    log(tr("%1 Compiler: %2").arg(strFileType).arg(mCompiler));
+    log(tr("%1 Compiler: %2").arg(strFileType, mCompiler));
     QString command = escapeCommandForLog(mCompiler, mArguments);
     log(tr("Command: %1").arg(command));
     mDirectory = extractFileDir(mFilename);
@@ -98,9 +97,9 @@ QByteArray StdinCompiler::pipedText()
     if (mEncoding == ENCODING_ASCII)
         return mContent.toLatin1();
 
-    QTextCodec* codec = QTextCodec::codecForName(mEncoding);
-    if (codec) {
-        return codec->fromUnicode(mContent);
+    TextEncoder encoder(mEncoding);
+    if (encoder.isValid()) {
+        return encoder.encodeUnchecked(mContent);
     } else {
         return mContent.toLocal8Bit();
     }

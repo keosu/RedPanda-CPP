@@ -3,7 +3,7 @@
 ## 传统 Unix 方式（`./configure`–`make`–`make install`）
 
 - 安装支持 C++17 的 GCC（≥ 7）或 Clang（≥ 6）。
-- 安装 Qt 5.15 Base、SVG、Tools 模块，包括库和开发文件。
+- 安装 Qt 5.15 或 6.8+ Base、SVG、Tools 模块，包括库和开发文件。
 - 如果使用静态版本的 Qt 编译，还要安装 fcitx5-qt。
 - 安装 astyle 以便在小熊猫 C++ 中对代码进行重新排版。
 
@@ -23,15 +23,17 @@
    ```
 
 qmake 变量:
-- `PREFIX`：默认值是 `/usr/local`。打包时应该定义为 `/usr`。
-- `LIBEXECDIR`：辅助程序的路径，默认值是 `$PREFIX/libexec`。Arch Linux 使用 `/usr/lib`。
-- `LINUX_STATIC_IME_PLUGIN=ON`（make 阶段）：静态链接输入法插件。推荐在使用静态版本的 Qt 编译时启用；**不要**在使用动态版本的 Qt 编译时启用。
+- `PREFIX`：`$MAKE install` 的安装路径。
+  - 小熊猫C++ 内部使用相对路径，不受影响。
+  - `.desktop` 文件受影响。
+- `LIBEXECDIR`：辅助程序的路径，**相对于 `PREFIX`**。
+  - Arch Linux 使用 `lib`。
 
 ### 基于 xmake 构建
 
 1. 配置：
    ```bash
-   xmake f -p linux -a x86_64 -m release --qt=/usr --prefix=/usr/local
+   xmake f -p linux -a x86_64 -m release --qt=/usr
    ```
 2. 构建：
    ```bash
@@ -39,7 +41,7 @@ qmake 变量:
    ```
 3. 安装：
    ```bash
-   sudo xmake install --root -o /  # -o ... 模拟了 make install 的 DESTDIR=...
+   sudo xmake install --root -o /usr/local
    ```
 
 提示：`xmake f --help` 可以查看更多选项。
